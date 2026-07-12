@@ -269,6 +269,7 @@ class MultiScanner:
 # Main
 # ---------------------------------------------------------------------------
 def main():
+    start_health_server()
     parser = argparse.ArgumentParser(
         description="Catecoin Multi-Scanner (price + smart money + discovery)"
     )
