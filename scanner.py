@@ -39,6 +39,7 @@ try:
 except ImportError:
     HAS_YAML = False
 
+from health_server import start_health_server
 logger = logging.getLogger("catecoin-scanner")
 
 DEFAULT_PAIR_ADDRESS = "0xaC366079B95E56AA2dF22dE84373e47594dc1031"
