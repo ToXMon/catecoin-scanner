@@ -334,5 +334,25 @@ def main():
         multi.run_loop()
 
 
+# ---------------------------------------------------------------------------
+# Container keep-alive (NEVER let the process exit in container mode)
+# ---------------------------------------------------------------------------
+def _container_keep_alive():
+    """Infinite loop to keep container alive. Health server runs as daemon thread."""
+    import time as _time
+    while True:
+        try:
+            _time.sleep(3600)
+        except KeyboardInterrupt:
+            break
+
+
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        logging.getLogger("catecoin-scanner").error(
+            "Main crashed: %s — keeping container alive", e, exc_info=True
+        )
+    # If main() returns (e.g., --once or --test-alert), keep alive in container
+    _container_keep_alive()
