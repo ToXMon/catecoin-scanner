@@ -1,0 +1,77 @@
+{
+  "metadata": {
+    "chain": "robinhood",
+    "chain_id": 4663,
+    "updated": "2026-07-12T00:46:00Z",
+    "sources": [
+      "Blockscout token holders",
+      "robinhood-alpha wallet_profiles.json",
+      "DexScreener"
+    ]
+  },
+  "wallets": [
+    {
+      "address": "0x4fe6C9D986D30791d87692490a4c0C280ad90ABE",
+      "label": "Cate Top Holder #3",
+      "tier": "whale",
+      "chain": "robinhood",
+      "source": "Blockscout token holders — Catecoin rank #3 (real on-chain data)"
+    },
+    {
+      "address": "0x05B957979b72e1b78Dc7f383359B6BD815e24A15",
+      "label": "Cate Top Holder #4",
+      "tier": "whale",
+      "chain": "robinhood",
+      "source": "Blockscout token holders — Catecoin rank #4 (real on-chain data)"
+    },
+    {
+      "address": "0xc93765534C4d4f1C20608677182be7c55E43AFD0",
+      "label": "Cate Top Holder #5",
+      "tier": "whale",
+      "chain": "robinhood",
+      "source": "Blockscout token holders — Catecoin rank #5 (real on-chain data)"
+    },
+    {
+      "address": "0xe41AA443BAD860E6B584060Cc365B58dC34caf92",
+      "label": "CASHCAT Insider 1 — Early Buyer",
+      "tier": "smart_money_elite",
+      "chain": "robinhood",
+      "source": "robinhood-alpha wallet_profiles — $46K PnL, bought 50s before Vlad Tenev post"
+    },
+    {
+      "address": "0xf70da97812CB96acDF810712Aa562db8dfA3dbEF",
+      "label": "CASHCAT Insider 2 — Early Buyer",
+      "tier": "smart_money_elite",
+      "chain": "robinhood",
+      "source": "robinhood-alpha wallet_profiles — $173K PnL, 10-min window insider"
+    },
+    {
+      "address": "0x4852C83AcE11bbA833368220a6eD5886fc2B7199",
+      "label": "CASHCAT Insider 3 — Early Buyer",
+      "tier": "smart_money_whale",
+      "chain": "robinhood",
+      "source": "robinhood-alpha wallet_profiles — $109K PnL, 10-min window insider"
+    },
+    {
+      "address": "0x416873D6ebd71adaF41f2E4A712d1014Cb946Cf5",
+      "label": "CASHCAT Insider 4 — Early Buyer",
+      "tier": "smart_money_whale",
+      "chain": "robinhood",
+      "source": "robinhood-alpha wallet_profiles — $27K PnL, 3-min window insider"
+    },
+    {
+      "address": "0xBAc7818469b54fD2a64db51072Ad2218FcAbC1FE",
+      "label": "CASHCAT Insider 5 — Early Buyer",
+      "tier": "smart_money_whale",
+      "chain": "robinhood",
+      "source": "robinhood-alpha wallet_profiles — $39K PnL, 10-min window insider"
+    }
+  ],
+  "tier_descriptions": {
+    "smart_money_elite": "Verified 1000x+ ROI or $100K+ PnL on at least one token",
+    "smart_money_whale": "Large positions $100K+ with smart entries",
+    "whale": "Large position holders $100K+",
+    "insider": "Deployer-linked or pre-launch buyers",
+    "mev_sniper": "Automated launch buyers (flag, don't follow)"
+  }
+}

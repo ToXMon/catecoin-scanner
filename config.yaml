@@ -1,0 +1,47 @@
+# Catecoin Multi-Scanner Configuration
+
+# === Price Monitor (existing) ===
+pair_address: "0xaC366079B95E56AA2dF22dE84373e47594dc1031"
+chain: "robinhood"
+cate_token_address: "0xfc5ABD01E4Def799549eee154449Ff6a7ae0cAc7"
+
+# Baseline price for % change calculations
+# null = auto-detect on first poll (recommended)
+baseline_override: null
+
+# Poll interval in seconds (60s = 1440 req/day, well within free limits)
+poll_interval_seconds: 60
+
+# Alert thresholds (% change from baseline, each fires once)
+thresholds: [100, 200, 500, 1000, -50]
+
+# === Smart Money Tracking ===
+smart_money:
+  enabled: true
+  poll_interval_seconds: 300  # 5 min — wallet activity slower than price
+  wallets_file: "smart_wallets.json"
+  consensus_strong_30min: 6   # 6+ wallets buying same token = strong signal
+  consensus_moderate_30min: 3 # 3+ wallets = moderate signal
+  blockscout_base: "https://robinhoodchain.blockscout.com/api/v2"
+
+# === Token Discovery ===
+discovery:
+  enabled: true
+  poll_interval_seconds: 600  # 10 min
+  min_liquidity_usd: 5000
+  min_volume_24h: 10000
+  min_holders: 50
+  zombie_dormancy_days: 7
+  zombie_volume_spike_multiplier: 3.0
+  blockscout_base: "https://robinhoodchain.blockscout.com/api/v2"
+
+# === Telegram ===
+# "env"             → read TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID from env vars
+# "robinhood-alpha"  → read from robinhood-alpha/config.yaml
+telegram_config_source: "robinhood-alpha"
+robinhood_alpha_config_path: "/a0/usr/workdir/robinhood-alpha/config.yaml"
+
+# Fallback (only used if env vars and robinhood-alpha both fail)
+# telegram:
+#   bot_token: ""
+#   chat_id: ""

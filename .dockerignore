@@ -1,0 +1,9 @@
+.git
+.github
+__pycache__/
+*.pyc
+state/
+logs/
+*.log
+README.md
+.gitignore
