@@ -2,8 +2,10 @@
 """Blockscout API client (free, no key required).
 
 Resilient client for Robinhood Chain explorer queries.
-Handles outages, rate limits, and client errors gracefully.
 Base: https://robinhoodchain.blockscout.com/api/v2
+
+NOTE: Robinhood Chain Blockscout does NOT index address transfers/transactions.
+Only token-level queries work reliably (tokens list, token info, token holders).
 """
 
 from __future__ import annotations
@@ -18,7 +20,7 @@ logger = logging.getLogger("catecoin-scanner.blockscout")
 
 DEFAULT_BASE = "https://robinhoodchain.blockscout.com/api/v2"
 REQUEST_TIMEOUT = 20
-MAX_RETRIES = 2  # reduced from 3 — don't hammer on outages
+MAX_RETRIES = 2
 RATE_LIMIT_DELAY = 0.3
 
 
@@ -39,100 +41,119 @@ class BlockscoutClient:
             "Accept": "application/json",
             "User-Agent": "catecoin-scanner/2.0",
         })
-        self._consecutive_failures = 0
-        self._degraded = False
+        self._last_request_time = 0.0
 
-    def _get(self, path: str, params: Optional[Dict[str, Any]] = None) -> Optional[Any]:
-        """GET with retry on 429/5xx only. 4xx errors fail immediately."""
-        # If we've had 5+ consecutive failures, enter degraded mode (skip requests for 60s)
-        if self._degraded:
-            logger.debug("Blockscout in degraded mode — skipping request to %s", path)
-            return None
+    def _rate_limit(self) -> None:
+        elapsed = time.time() - self._last_request_time
+        if elapsed < RATE_LIMIT_DELAY:
+            time.sleep(RATE_LIMIT_DELAY - elapsed)
+        self._last_request_time = time.time()
 
+    def _get(self, path: str, params: Optional[dict] = None) -> Optional[dict]:
         url = f"{self.base_url}{path}"
-        for attempt in range(self.max_retries):
+        for attempt in range(self.max_retries + 1):
             try:
+                self._rate_limit()
                 resp = self.session.get(url, params=params, timeout=self.timeout)
-
-                # Rate limited — retry with backoff
-                if resp.status_code == 429:
+                if resp.status_code == 200:
+                    return resp.json()
+                if resp.status_code in (429, 502, 503):
                     wait = 2 ** attempt
-                    logger.warning("Blockscout 429 rate limit, waiting %ds", wait)
+                    logger.warning(
+                        "Blockscout %d on %s, retry in %ds", resp.status_code, path, wait
+                    )
                     time.sleep(wait)
                     continue
-
-                # Server error — retry with backoff
-                if resp.status_code >= 500:
-                    wait = 2 ** attempt
-                    logger.warning("Blockscout %d server error, attempt %d/%d", resp.status_code, attempt + 1, self.max_retries)
-                    if attempt < self.max_retries - 1:
-                        time.sleep(wait)
-                        continue
-
-                # Client error (400, 422, 404) — don't retry, these won't fix themselves
-                if 400 <= resp.status_code < 500:
-                    logger.debug("Blockscout %d client error for %s — not retrying", resp.status_code, path)
-                    self._consecutive_failures = 0
-                    return None
-
-                resp.raise_for_status()
-                self._consecutive_failures = 0
-                self._degraded = False
-                return resp.json()
-
+                logger.warning("Blockscout %d on %s", resp.status_code, path)
+                return None
             except requests.exceptions.Timeout:
-                logger.warning("Blockscout timeout, attempt %d/%d", attempt + 1, self.max_retries)
-                if attempt < self.max_retries - 1:
-                    time.sleep(2 ** attempt)
-            except requests.RequestException as e:
-                logger.warning("Blockscout fetch error: %s", e)
-                if attempt < self.max_retries - 1:
-                    time.sleep(2 ** attempt)
-
-        # All retries exhausted
-        self._consecutive_failures += 1
-        if self._consecutive_failures >= 5:
-            self._degraded = True
-            logger.error("Blockscout appears to be DOWN — entering degraded mode (skipping requests for 60s)")
-            # Schedule recovery
-            import threading
-            threading.Timer(60.0, self._recover).start()
-
-        logger.error("Blockscout fetch failed for %s", path)
+                logger.warning("Blockscout timeout on %s (attempt %d)", path, attempt + 1)
+            except Exception as e:
+                logger.warning("Blockscout error on %s: %s", path, e)
         return None
 
-    def _recover(self):
-        """Exit degraded mode after cooldown."""
-        self._degraded = False
-        self._consecutive_failures = 0
-        logger.info("Blockscout exiting degraded mode — will retry requests")
+    def get_tokens(self, limit: int = 50, q: str = "") -> Optional[dict]:
+        """GET /tokens — list tokens (supports ?q=text search)."""
+        params = {"limit": limit}
+        if q:
+            params["q"] = q
+        return self._get("/tokens", params=params)
 
-    def get_token_info(self, token_address: str) -> Optional[Dict[str, Any]]:
+    def get_all_token_addresses(self) -> List[str]:
+        """Fetch all known token addresses from Blockscout. Used for seen-set diffing."""
+        data = self.get_tokens(limit=50)
+        if not data or not data.get("items"):
+            return []
+        addresses = []
+        for item in data["items"]:
+            addr = item.get("address", "")
+            if addr:
+                addresses.append(addr.lower())
+        return addresses
+
+    def get_token_info(self, address: str) -> Optional[dict]:
         """GET /tokens/{address} — token metadata."""
-        return self._get(f"/tokens/{token_address}")
+        return self._get(f"/tokens/{address}")
 
-    def get_token_holders(self, token_address: str) -> List[Dict[str, Any]]:
-        """GET /tokens/{address}/holders — top token holders."""
-        data = self._get(f"/tokens/{token_address}/holders")
-        return data.get("items") if data else []
+    def get_token_holders(self, address: str, limit: int = 50) -> List[dict]:
+        """GET /tokens/{address}/holders — top holders.
 
-    def get_address_transfers(
-        self, address: str, params: Optional[Dict[str, Any]] = None
-    ) -> Optional[Dict[str, Any]]:
-        """GET /addresses/{address}/token-transfers — ERC-20 transfers."""
+        NOTE: Robinhood Chain Blockscout does NOT accept `limit` param.
+        Returns all available holders.
+        """
+        data = self._get(f"/tokens/{address}/holders")
+        if not data or not data.get("items"):
+            return []
+        return data["items"][:limit]  # Slice locally instead
+
+    def get_token_transfers(self, address: str, params: Optional[dict] = None) -> Optional[dict]:
+        """GET /tokens/{address}/transfers — token transfer history.
+
+        NOTE: Returns empty on Robinhood Chain. Kept for compatibility.
+        """
+        if params is None:
+            params = {"limit": 50}
+        return self._get(f"/tokens/{address}/transfers", params=params)
+
+    def get_address_transfers(self, address: str, params: Optional[dict] = None) -> Optional[dict]:
+        """GET /addresses/{address}/token-transfers — wallet transfer history.
+
+        NOTE: Returns empty on Robinhood Chain. Kept for compatibility.
+        """
+        if params is None:
+            params = {"limit": 50}
         return self._get(f"/addresses/{address}/token-transfers", params=params)
 
-    def get_token_transfers(
-        self, token_address: str, params: Optional[Dict[str, Any]] = None
-    ) -> Optional[Dict[str, Any]]:
-        """GET /tokens/{address}/transfers — all transfers for a token."""
-        return self._get(f"/tokens/{token_address}/transfers", params=params)
+    def search_tokens(self, query: str) -> List[dict]:
+        """Search tokens by text query."""
+        data = self.get_tokens(limit=50, q=query)
+        if not data or not data.get("items"):
+            return []
+        return data["items"]
 
-    def get_new_tokens(self, limit: int = 50) -> List[Dict[str, Any]]:
-        """GET /tokens?sort=address_timestamp&order=desc — newest tokens."""
-        data = self._get("/tokens", params={"sort": "address_timestamp", "order": "desc", "limit": str(limit)})
-        return data.get("items") if data else []
+    def get_token_holder_count(self, address: str) -> int:
+        """Get holder count via /counters endpoint."""
+        data = self._get(f"/tokens/{address}/counters")
+        if not data:
+            return 0
+        holders = data.get("token_holders_count", "0")
+        try:
+            return int(holders)
+        except (TypeError, ValueError):
+            return 0
 
-    def get_address_balance(self, address: str) -> Optional[Dict[str, Any]]:
-        """GET /addresses/{address} — address info, balance, tx count."""
-        return self._get(f"/addresses/{address}")
+    def get_new_tokens(self, limit: int = 20) -> List[dict]:
+        """Get tokens using seen-set diff approach.
+
+        Since Blockscout doesn't support timestamp sorting on Robinhood Chain,
+        we fetch all tokens and the caller tracks what's new.
+        """
+        data = self.get_tokens(limit=50)
+        if not data or not data.get("items"):
+            return []
+        return data["items"][:limit]
+
+    def is_healthy(self) -> bool:
+        """Quick health check — can we reach the API?"""
+        data = self.get_tokens(limit=1)
+        return bool(data and data.get("items"))

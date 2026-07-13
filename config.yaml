@@ -1,47 +1,104 @@
-# Catecoin Multi-Scanner Configuration
+# Catecoin Multi-Scanner Configuration — World-Class Alpha Screener
 
-# === Price Monitor (existing) ===
+# === Price Monitor ===
 pair_address: "0xaC366079B95E56AA2dF22dE84373e47594dc1031"
 chain: "robinhood"
 cate_token_address: "0xfc5ABD01E4Def799549eee154449Ff6a7ae0cAc7"
 
-# Baseline price for % change calculations
-# null = auto-detect on first poll (recommended)
 baseline_override: null
-
-# Poll interval in seconds (60s = 1440 req/day, well within free limits)
 poll_interval_seconds: 60
-
-# Alert thresholds (% change from baseline, each fires once)
 thresholds: [100, 200, 500, 1000, -50]
+price_alert_pct: 15.0  # Alert on 15%+ moves between polls
 
-# === Smart Money Tracking ===
+# === Alchemy API (PRIMARY — replaces broken Blockscout address transfers) ===
+alchemy:
+  api_key: "RPJpfmFz_jqi4CAIc9Pe6"  # Free tier: 30M CU/month, 500 CU/s
+  network: "robinhood-mainnet"
+  cu_warning_threshold: 0.8  # Warn at 80% of monthly limit
+  cu_monthly_limit: 30000000
+
+# === Bitquery (DISABLED — Ory auth token is invalid for X-API-KEY) ===
+bitquery:
+  api_key: "ory_at_sQI1ZH5uFFTYAsDZ04shUwOn0WS-1R5OmNNIc--2XaU.klEz5Py5QnjW11klVzjfTy49HvMnVASPkH7GG77igO"
+  enabled: false  # Auth failed; cannot use until valid Bitquery key is obtained
+  reason: "Ory auth token is invalid for X-API-KEY header. Unauthorized."
+
+# === Smart Money Tracking (holder-based detection) ===
 smart_money:
   enabled: true
-  poll_interval_seconds: 300  # 5 min — wallet activity slower than price
+  poll_interval_seconds: 300
   wallets_file: "smart_wallets.json"
-  consensus_strong_30min: 6   # 6+ wallets buying same token = strong signal
-  consensus_moderate_30min: 3 # 3+ wallets = moderate signal
+  consensus_strong_weight: 1.5
+  consensus_moderate_weight: 0.8
+  consensus_strong_30min: 2
+  consensus_moderate_30min: 1
+  min_wallet_score: 35  # Lowered to catch whale-tier holders (Cate Top Holder #3 scores 42.5)
   blockscout_base: "https://robinhoodchain.blockscout.com/api/v2"
 
 # === Token Discovery ===
 discovery:
   enabled: true
-  poll_interval_seconds: 600  # 10 min
+  poll_interval_seconds: 600
   min_liquidity_usd: 5000
   min_volume_24h: 10000
-  min_holders: 50
+  min_holders: 10
   zombie_dormancy_days: 7
   zombie_volume_spike_multiplier: 3.0
   blockscout_base: "https://robinhoodchain.blockscout.com/api/v2"
+  alpha:
+    min_alpha_score: 50
+    max_age_hours: 24
+    enable_derivative_filter: true
+    enable_safety_check: true
+
+# === Whale Monitor (NEW) ===
+whale_monitor:
+  enabled: true
+  poll_interval_seconds: 300
+  min_transfer_usd: 10000  # Alert on transfers > $10K
+  tracked_tokens:
+    - address: "0xfc5ABD01E4Def799549eee154449Ff6a7ae0cAc7"
+      symbol: "CATE"
+    - address: "0x35B5B9Bb84E9D1b3Bb9DcF6C3D9C8C6C7c5C7e5C"
+      symbol: "CASHCAT"
+  blockscout_base: "https://robinhoodchain.blockscout.com/api/v2"
+
+# === Zombie Detector (NEW) ===
+zombie_detector:
+  enabled: true
+  poll_interval_seconds: 1800  # 30 min
+  min_dormancy_days: 7
+  min_volume_spike_mult: 3.0
+  min_liquidity_usd: 2000
+
+# === Liquidity Flow Analyzer (NEW) ===
+liquidity_flow:
+  enabled: true
+  poll_interval_seconds: 600  # 10 min
+  change_threshold_pct: 10.0  # Alert on 10%+ liquidity changes
+  tracked_tokens:
+    - address: "0xfc5ABD01E4Def799549eee154449Ff6a7ae0cAc7"
+      symbol: "CATE"
+  blockscout_base: "https://robinhoodchain.blockscout.com/api/v2"
 
 # === Telegram ===
-# "env"             → read TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID from env vars
-# "robinhood-alpha"  → read from robinhood-alpha/config.yaml
 telegram_config_source: "robinhood-alpha"
 robinhood_alpha_config_path: "/a0/usr/workdir/robinhood-alpha/config.yaml"
 
-# Fallback (only used if env vars and robinhood-alpha both fail)
-# telegram:
-#   bot_token: ""
-#   chat_id: ""
+# === Alpha Quality Filters (NEW — Noise Suppression) ===
+alpha:
+  min_buy_value_usd: 100
+  min_liquidity_usd: 5000
+  min_liquidity_mcap_ratio: 0.1
+  airdrop_blocklist:
+    - "0x0000000000000000000000000000000000000000"
+
+# === Reversal Detector (NEW) ===
+reversal:
+  enabled: true
+  poll_interval_seconds: 900
+  min_drop_pct: 20.0
+  volume_spike_mult: 3.0
+  check_smart_money: true
+  min_liquidity_usd: 2000
+  max_tokens_per_scan: 50

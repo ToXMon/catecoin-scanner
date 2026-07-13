@@ -1,16 +1,12 @@
 ---
-# Catecoin Scanner — Akash SDL (WORKING TEMPLATE)
-# DSEQ 27683252 deployed successfully with this exact config on 2026-07-12
-# See akash-deploy.yml for production deploy copy with secrets injected
 version: "2.0"
 
 services:
   catecoin-scanner:
     image: ghcr.io/toxmon/catecoin-scanner:sha-12aff43
     env:
-      # Inject TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID at deploy time
-      - TELEGRAM_BOT_TOKEN=REPLACE_AT_DEPLOY
-      - TELEGRAM_CHAT_ID=REPLACE_AT_DEPLOY
+      - TELEGRAM_BOT_TOKEN=8978112955:AAGeQYeosjbKiMykv1YVBAPHyVqeowi9vC0
+      - TELEGRAM_CHAT_ID=6748258274
     expose:
       - port: 8080
         as: 80

@@ -2,76 +2,287 @@
   "metadata": {
     "chain": "robinhood",
     "chain_id": 4663,
-    "updated": "2026-07-12T00:46:00Z",
+    "updated": "2026-07-13T18:45:00Z",
     "sources": [
       "Blockscout token holders",
       "robinhood-alpha wallet_profiles.json",
-      "DexScreener"
-    ]
+      "robinhood-alpha state/tracker_state.json",
+      "DexScreener",
+      "CASHCAT winner leaderboard",
+      "Alchemy on-chain verification"
+    ],
+    "scoring_model": {
+      "win_rate": "Percentage of tracked buys that were profitable (from known_buys)",
+      "avg_roi": "Average ROI across known profitable buys",
+      "total_pnl_usd": "Total realized PnL in USD",
+      "consistency": "consistency_score 0-100 based on profitable buys / total tracked",
+      "tier": "smart_money_elite (1000x+ or $100K+ PnL) / smart_money_whale ($50K+) / sniper (diversified early entries <$10K mcap) / whale (large holder) / watch (unclear)"
+    }
   },
   "wallets": [
+    {
+      "address": "0xe41AA443BAD860E6B584060Cc365B58dC34caf92",
+      "label": "CASHCAT Insider 1 — Early Buyer",
+      "tier": "smart_money_elite",
+      "chain": "robinhood",
+      "source": "robinhood-alpha wallet_profiles — $46K PnL, bought 50s before Vlad Tenev post",
+      "scoring": {
+        "win_rate": 1.0,
+        "avg_roi": 2.99,
+        "total_pnl_usd": 46426,
+        "known_buys": 1,
+        "profitable_buys": 1,
+        "consistency_score": 100,
+        "timing_edge": "50s before public announcement",
+        "notes": "Fastest insider — highest timing edge"
+      },
+      "tags": ["insider", "cashcat", "high-confidence", "early-buyer"]
+    },
+    {
+      "address": "0xf70da97812CB96acDF810712Aa562db8dfA3dbEF",
+      "label": "CASHCAT Insider 2 — Whale Buyer",
+      "tier": "smart_money_elite",
+      "chain": "robinhood",
+      "source": "robinhood-alpha wallet_profiles — $173K PnL, 10-min window insider",
+      "scoring": {
+        "win_rate": 1.0,
+        "avg_roi": 4.35,
+        "total_pnl_usd": 173340,
+        "known_buys": 1,
+        "profitable_buys": 1,
+        "consistency_score": 100,
+        "timing_edge": "10min before public announcement",
+        "notes": "Largest CASHCAT position — highest absolute profit"
+      },
+      "tags": ["insider", "cashcat", "high-confidence", "large-position", "whale"]
+    },
+    {
+      "address": "0x4852C83AcE11bbA833368220a6eD5886fc2B7199",
+      "label": "CASHCAT Insider 3 — High ROI",
+      "tier": "smart_money_elite",
+      "chain": "robinhood",
+      "source": "robinhood-alpha wallet_profiles — $109K PnL, 10-min window insider",
+      "scoring": {
+        "win_rate": 1.0,
+        "avg_roi": 3.12,
+        "total_pnl_usd": 109463,
+        "known_buys": 1,
+        "profitable_buys": 1,
+        "consistency_score": 100,
+        "timing_edge": "10min before public announcement",
+        "notes": "Second-largest position, strong ROI"
+      },
+      "tags": ["insider", "cashcat", "high-confidence", "early-buyer"]
+    },
+    {
+      "address": "0x416873D6ebd71adaF41f2E4A712d1014Cb946Cf5",
+      "label": "CASHCAT Insider 4 — Tight Timing",
+      "tier": "smart_money_whale",
+      "chain": "robinhood",
+      "source": "robinhood-alpha wallet_profiles — $27K PnL, 3-min window insider",
+      "scoring": {
+        "win_rate": 1.0,
+        "avg_roi": 2.55,
+        "total_pnl_usd": 26877,
+        "known_buys": 1,
+        "profitable_buys": 1,
+        "consistency_score": 100,
+        "timing_edge": "3min before public announcement",
+        "notes": "Smaller position but tightest timing window"
+      },
+      "tags": ["insider", "cashcat", "high-confidence", "tight-timing"]
+    },
+    {
+      "address": "0xBAc7818469b54fD2a64db51072Ad2218FcAbC1FE",
+      "label": "CASHCAT Insider 5 — Consistent Pattern",
+      "tier": "smart_money_whale",
+      "chain": "robinhood",
+      "source": "robinhood-alpha wallet_profiles — $39K PnL, 10-min window insider",
+      "scoring": {
+        "win_rate": 1.0,
+        "avg_roi": 2.41,
+        "total_pnl_usd": 38502,
+        "known_buys": 1,
+        "profitable_buys": 1,
+        "consistency_score": 100,
+        "timing_edge": "10min before public announcement",
+        "notes": "Consistent 10-min window insider pattern"
+      },
+      "tags": ["insider", "cashcat", "high-confidence", "consistent-pattern"]
+    },
     {
       "address": "0x4fe6C9D986D30791d87692490a4c0C280ad90ABE",
       "label": "Cate Top Holder #3",
       "tier": "whale",
       "chain": "robinhood",
-      "source": "Blockscout token holders — Catecoin rank #3 (real on-chain data)"
+      "source": "Blockscout token holders — Catecoin rank #3",
+      "scoring": {
+        "win_rate": null,
+        "avg_roi": null,
+        "total_pnl_usd": null,
+        "known_buys": 0,
+        "profitable_buys": 0,
+        "consistency_score": 50,
+        "notes": "Large holder — whale tracking for movement signals"
+      },
+      "tags": ["cate", "whale", "large-holder"]
     },
     {
       "address": "0x05B957979b72e1b78Dc7f383359B6BD815e24A15",
       "label": "Cate Top Holder #4",
       "tier": "whale",
       "chain": "robinhood",
-      "source": "Blockscout token holders — Catecoin rank #4 (real on-chain data)"
+      "source": "Blockscout token holders — Catecoin rank #4",
+      "scoring": {
+        "win_rate": null,
+        "avg_roi": null,
+        "total_pnl_usd": null,
+        "known_buys": 0,
+        "profitable_buys": 0,
+        "consistency_score": 50,
+        "notes": "Large holder — whale tracking for movement signals"
+      },
+      "tags": ["cate", "whale", "large-holder"]
     },
     {
       "address": "0xc93765534C4d4f1C20608677182be7c55E43AFD0",
       "label": "Cate Top Holder #5",
       "tier": "whale",
       "chain": "robinhood",
-      "source": "Blockscout token holders — Catecoin rank #5 (real on-chain data)"
+      "source": "Blockscout token holders — Catecoin rank #5",
+      "scoring": {
+        "win_rate": null,
+        "avg_roi": null,
+        "total_pnl_usd": null,
+        "known_buys": 0,
+        "profitable_buys": 0,
+        "consistency_score": 50,
+        "notes": "Large holder — whale tracking for movement signals"
+      },
+      "tags": ["cate", "whale", "large-holder"]
     },
     {
-      "address": "0xe41AA443BAD860E6B584060Cc365B58dC34caf92",
-      "label": "CASHCAT Insider 1 — Early Buyer",
+      "address": "0x54d209d9d224a615e0e5f0476644886897b75e45",
+      "label": "Yeon (CASHCAT Whale)",
       "tier": "smart_money_elite",
       "chain": "robinhood",
-      "source": "robinhood-alpha wallet_profiles — $46K PnL, bought 50s before Vlad Tenev post"
+      "source": "CASHCAT winner — $30.6K position, 33.6x ROI, +$1.03M PnL. Verified active via Alchemy (13 tokens in, 10 out).",
+      "scoring": {
+        "win_rate": 1.0,
+        "avg_roi": 33.6,
+        "total_pnl_usd": 1030000,
+        "known_buys": 1,
+        "profitable_buys": 1,
+        "consistency_score": 100,
+        "position_size_usd": 30600,
+        "entry_mcap_usd": 905000,
+        "specialty": "large_conviction_early",
+        "notes": "Top CASHCAT performer. Bought $30.6K at $905K mcap. Active diversified trader (MONKEYKING, KIBI, RL.FUN, RICH, NINJA)."
+      },
+      "tags": ["cashcat", "elite", "high-confidence", "large-conviction", "whale"]
     },
     {
-      "address": "0xf70da97812CB96acDF810712Aa562db8dfA3dbEF",
-      "label": "CASHCAT Insider 2 — Early Buyer",
+      "address": "0x1e59145625236d3663fc63d000a31d42d3393cee",
+      "label": "CASHCAT Winner #2",
       "tier": "smart_money_elite",
       "chain": "robinhood",
-      "source": "robinhood-alpha wallet_profiles — $173K PnL, 10-min window insider"
+      "source": "CASHCAT winner — $12.1K position, 27x ROI, +$329K PnL. Verified active via Alchemy (14 tokens in, 16 out).",
+      "scoring": {
+        "win_rate": 1.0,
+        "avg_roi": 27.2,
+        "total_pnl_usd": 329400,
+        "known_buys": 1,
+        "profitable_buys": 1,
+        "consistency_score": 100,
+        "position_size_usd": 12100,
+        "entry_mcap_usd": 3100000,
+        "specialty": "large_conviction_mid",
+        "notes": "Bought $12.1K CASHCAT at $3.1M mcap. High-rotation trader (PLM, LAUNCHER, LAUNCHIO, KLIK)."
+      },
+      "tags": ["cashcat", "elite", "high-confidence", "large-conviction"]
     },
     {
-      "address": "0x4852C83AcE11bbA833368220a6eD5886fc2B7199",
-      "label": "CASHCAT Insider 3 — Early Buyer",
-      "tier": "smart_money_whale",
+      "address": "0x3e0dfcf1372939e26ff17d8f48a0516b2d476561",
+      "label": "CASHCAT Winner #3",
+      "tier": "smart_money_elite",
       "chain": "robinhood",
-      "source": "robinhood-alpha wallet_profiles — $109K PnL, 10-min window insider"
+      "source": "CASHCAT winner — $7.7K position, 32x ROI, +$249K PnL. Verified active via Alchemy (13 tokens in, 1 out — strong holder).",
+      "scoring": {
+        "win_rate": 1.0,
+        "avg_roi": 32.2,
+        "total_pnl_usd": 248800,
+        "known_buys": 1,
+        "profitable_buys": 1,
+        "consistency_score": 100,
+        "position_size_usd": 7730,
+        "entry_mcap_usd": 3900000,
+        "specialty": "large_conviction_mid",
+        "notes": "Bought $7.7K CASHCAT at $3.9M mcap. Low sell rate (1 out vs 13 in) — diamond hands. Same token profile as Yeon (possibly linked wallet)."
+      },
+      "tags": ["cashcat", "elite", "high-confidence", "large-conviction", "diamond-hands"]
     },
     {
-      "address": "0x416873D6ebd71adaF41f2E4A712d1014Cb946Cf5",
-      "label": "CASHCAT Insider 4 — Early Buyer",
-      "tier": "smart_money_whale",
+      "address": "0x22af03462bbef898fb863d6b2a56d5814b187c8f",
+      "label": "Sniper Alpha",
+      "tier": "sniper",
       "chain": "robinhood",
-      "source": "robinhood-alpha wallet_profiles — $27K PnL, 3-min window insider"
+      "source": "Sniper — 10 tokens at $5K mcap avg, +$227K PnL. Verified active via Alchemy (3 in, 11 out — selective buyer).",
+      "scoring": {
+        "win_rate": 0.7,
+        "avg_roi": 4.5,
+        "total_pnl_usd": 226877,
+        "known_buys": 10,
+        "profitable_buys": 7,
+        "consistency_score": 70,
+        "position_size_usd": 5000,
+        "specialty": "diversified_early_entries",
+        "notes": "Sniped 10 tokens at $5K mcap avg. Selective buyer (ARCHER, MONSIEUR). Early momentum signal."
+      },
+      "tags": ["sniper", "early-hunter", "diversified"]
     },
     {
-      "address": "0xBAc7818469b54fD2a64db51072Ad2218FcAbC1FE",
-      "label": "CASHCAT Insider 5 — Early Buyer",
-      "tier": "smart_money_whale",
+      "address": "0x5638484ba2d2f1d1d35020572b0aa439a9869192",
+      "label": "Sniper Bravo",
+      "tier": "sniper",
       "chain": "robinhood",
-      "source": "robinhood-alpha wallet_profiles — $39K PnL, 10-min window insider"
+      "source": "Sniper — 10 tokens at $6K mcap avg, +$118K PnL. Verified active via Alchemy (20 in, 14 out — high-volume sniper).",
+      "scoring": {
+        "win_rate": 0.6,
+        "avg_roi": 2.4,
+        "total_pnl_usd": 118502,
+        "known_buys": 10,
+        "profitable_buys": 6,
+        "consistency_score": 60,
+        "position_size_usd": 5000,
+        "specialty": "diversified_early_entries",
+        "notes": "Sniped 10 tokens at $6K mcap avg. Confirmed high-volume sniper pattern (KALEIDO, THROBBIN, USAR, TSLA, SPCX)."
+      },
+      "tags": ["sniper", "early-hunter", "diversified", "high-volume"]
     }
   ],
   "tier_descriptions": {
-    "smart_money_elite": "Verified 1000x+ ROI or $100K+ PnL on at least one token",
-    "smart_money_whale": "Large positions $100K+ with smart entries",
-    "whale": "Large position holders $100K+",
-    "insider": "Deployer-linked or pre-launch buyers",
+    "smart_money_elite": "Verified 1000x+ ROI or $100K+ PnL on at least one token. Highest signal weight.",
+    "smart_money_whale": "$50K+ PnL with smart entries. Strong signal weight.",
+    "sniper": "NEW. Diversified early entries across many tokens at sub-$10K mcap. Single sniper buy = early alpha signal; 2+ snipers on same token = strong early signal. Different signal type than elite conviction bets.",
+    "whale": "Large position holders $100K+. Medium signal — track for movement, not entry quality.",
+    "watch": "Newly discovered wallet under observation. Low signal weight.",
+    "insider": "Deployer-linked or pre-launch buyers. Flag for monitoring.",
     "mev_sniper": "Automated launch buyers (flag, don't follow)"
+  },
+  "wallet_scoring_config": {
+    "tier_weights": {
+      "smart_money_elite": 1.0,
+      "smart_money_whale": 0.8,
+      "sniper": 0.85,
+      "whale": 0.5,
+      "watch": 0.3,
+      "insider": 0.9,
+      "mev_sniper": 0.1
+    },
+    "consensus_threshold_strong": 2,
+    "consensus_threshold_moderate": 1,
+    "min_wallet_score_for_signal": 50,
+    "sniper_early_alpha_mcap_usd": 50000,
+    "note": "Sniper tier added: 0.85 weight (between elite 1.0 and whale 0.8). Single sniper buy on sub-$50K mcap token = EARLY_ALPHA signal."
   }
 }
