@@ -3,7 +3,7 @@ version: "2.0"
 
 services:
   catecoin-scanner:
-    image: ghcr.io/toxmon/catecoin-scanner:sha-12aff43
+    image: ghcr.io/toxmon/catecoin-scanner:sha-fd9e933
     env:
       - TELEGRAM_BOT_TOKEN=8978112955:AAGeQYeosjbKiMykv1YVBAPHyVqeowi9vC0
       - TELEGRAM_CHAT_ID=6748258274

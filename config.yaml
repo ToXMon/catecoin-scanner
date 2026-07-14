@@ -10,6 +10,14 @@ poll_interval_seconds: 60
 thresholds: [100, 200, 500, 1000, -50]
 price_alert_pct: 15.0  # Alert on 15%+ moves between polls
 
+# === Alert Journal (SQLite + forward price tracking for LLM training) ===
+journal:
+  enabled: true
+  db_path: "state/alert_journal.db"
+  export_dir: "state/exports"
+  re_alert_cooldown_hours: 24
+  price_check_intervals: ["15m", "1h", "4h", "24h", "48h"]
+
 # === Alchemy API (PRIMARY — replaces broken Blockscout address transfers) ===
 alchemy:
   api_key: "RPJpfmFz_jqi4CAIc9Pe6"  # Free tier: 30M CU/month, 500 CU/s

@@ -30,6 +30,7 @@ from dexscreener import DexScreenerClient
 from telegram_alert import TelegramAlerter
 from alpha_scorer import DerivativeDetector, AlphaScorer
 from alchemy_client import AlchemyClient
+from alert_journal import AlertJournal
 
 try:
     import yaml
@@ -201,12 +202,27 @@ class SmartMoneyTracker:
         # Track which tokens each wallet has been alerted for (dedup)
         self.alerted_holdings: Dict[str, Set[str]] = {}  # wallet_addr -> set of token_addrs
 
+        # GLOBAL persistent dedup: flat set of token_addrs alerted by ANY wallet.
+        # Prevents the same token being re-alerted across wallets and container restarts.
+        self.dedup_file = os.path.join(os.path.dirname(self.wallets_file), "alerted_tokens.json")
+        self.global_alerted: Dict[str, dict] = {}  # token_addr -> {first_alerted, last_alerted, count}
+        self.re_alert_cooldown_hours = sm_cfg.get("re_alert_cooldown_hours", 24)
+        self._load_global_dedup()
+
         # Alchemy dedup: wallet_addr -> set of token contracts already detected via transfers
         self._alchemy_known_wallet_tokens: Dict[str, Set[str]] = {}
 
         # Consensus: token_addr -> {wallets, weights, timestamps}
         self.consensus: Dict[str, Dict[str, Any]] = {}
         self.consensus_alerted: Dict[str, str] = {}
+
+        # Alert journal (SQLite + forward price tracking for LLM training)
+        journal_cfg = config.get("journal", {}) or {}
+        self.journal = AlertJournal(
+            db_path=journal_cfg.get("db_path", "state/alert_journal.db"),
+            enabled=journal_cfg.get("enabled", True),
+            intervals=journal_cfg.get("price_check_intervals"),
+        )
 
     @staticmethod
     def _load_wallets_data(wallets_file: str) -> dict:
@@ -215,6 +231,50 @@ class SmartMoneyTracker:
                 return json.load(f)
         except Exception:
             return {}
+
+    # ─── Global persistent dedup ──────────────────────────────────────
+
+    def _load_global_dedup(self) -> None:
+        """Load global alerted-token state from JSON file."""
+        try:
+            with open(self.dedup_file) as f:
+                data = json.load(f)
+            self.global_alerted = data if isinstance(data, dict) else {}
+            logger.info("Loaded global dedup: %d tokens", len(self.global_alerted))
+        except (FileNotFoundError, json.JSONDecodeError):
+            self.global_alerted = {}
+
+    def _save_global_dedup(self) -> None:
+        """Persist global alerted-token state."""
+        try:
+            os.makedirs(os.path.dirname(self.dedup_file) or ".", exist_ok=True)
+            with open(self.dedup_file, "w") as f:
+                json.dump(self.global_alerted, f, indent=2)
+        except Exception as e:
+            logger.warning("Failed to save dedup state: %s", e)
+
+    def _is_token_alerted(self, token_addr: str) -> bool:
+        """Check if token was recently alerted. Respects re_alert_cooldown_hours."""
+        token_addr = (token_addr or "").lower()
+        entry = self.global_alerted.get(token_addr)
+        if not entry:
+            return False
+        last = entry.get("last_alerted", 0)
+        cooldown_s = self.re_alert_cooldown_hours * 3600
+        if (time.time() - last) < cooldown_s:
+            return True
+        return False
+
+    def _mark_token_alerted(self, token_addr: str) -> None:
+        """Record token as alerted in global dedup."""
+        token_addr = (token_addr or "").lower()
+        now = time.time()
+        entry = self.global_alerted.get(token_addr, {})
+        entry["first_alerted"] = entry.get("first_alerted", now)
+        entry["last_alerted"] = now
+        entry["count"] = entry.get("count", 0) + 1
+        self.global_alerted[token_addr] = entry
+        self._save_global_dedup()
 
     def scan_wallet_transfers_via_alchemy(self) -> int:
         """PRIMARY scan path: detect new token buys by tracked wallets via Alchemy.
@@ -308,12 +368,24 @@ class SmartMoneyTracker:
             alerts_sent,
             self.alchemy.cu_used,
         )
+
+        # Run forward price tracking for journal (checks due intervals)
+        try:
+            self.journal.run_price_tracker(self.dex)
+        except Exception as e:
+            logger.debug("Price tracker cycle failed: %s", e)
+
         return alerts_sent
 
     def _alert_alchemy_new_buy(self, wallet: dict, transfer: dict, wallet_score: float) -> bool:
         """Alert that a tracked wallet just received a NEW token (fresh buy)."""
-        # ─── NOISE SUPPRESSION FILTERS (memecoin best practices) ───
+        # ─── GLOBAL DEDUP CHECK (before any API calls) ───
         token_addr = (transfer.get("token_contract", "") or "").lower()
+        if self._is_token_alerted(token_addr):
+            logger.debug("Skipping %s — globally deduped (already alerted recently)", token_addr[:10])
+            return False
+
+        # ─── NOISE SUPPRESSION FILTERS (memecoin best practices) ───
 
         # Filter 1: airdrop/spam blocklist
         if token_addr in self.airdrop_blocklist:
@@ -408,7 +480,7 @@ class SmartMoneyTracker:
             label[:25], tier, symbol, symbol, value,
         )
 
-        return self.alerter.send_alpha_alert(
+        sent = self.alerter.send_alpha_alert(
             symbol=symbol,
             name=name,
             contract=token_addr,
@@ -425,6 +497,31 @@ class SmartMoneyTracker:
             fdv=fdv,
             category="🧠 SMART MONEY",
         )
+
+        if sent:
+            self._mark_token_alerted(token_addr)
+            self.journal.log_alert({
+                "alert_type": "smart_money_buy",
+                "token_symbol": symbol,
+                "token_name": name,
+                "token_address": token_addr,
+                "price_usd": price,
+                "liquidity_usd": liquidity,
+                "volume_24h": volume,
+                "fdv": fdv,
+                "holders": holders,
+                "wallet_address": wallet.get("address", ""),
+                "wallet_label": label,
+                "wallet_tier": tier,
+                "wallet_score": wallet_score,
+                "alpha_score": int(wallet_score),
+                "risk_level": risk,
+                "thesis": thesis,
+                "risk_factors": risk_factors,
+                "telegram_sent": True,
+            })
+
+        return sent
 
     def _track_consensus_with_timestamp(
         self,

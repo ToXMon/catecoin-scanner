@@ -11,10 +11,13 @@ Only token-level queries work reliably (tokens list, token info, token holders).
 from __future__ import annotations
 
 import logging
+import re
 import time
 from typing import Any, Dict, List, Optional
 
 import requests
+
+EVM_ADDR_RE = re.compile(r"^0x[a-fA-F0-9]{40}$")
 
 logger = logging.getLogger("catecoin-scanner.blockscout")
 
@@ -42,6 +45,13 @@ class BlockscoutClient:
             "User-Agent": "catecoin-scanner/2.0",
         })
         self._last_request_time = 0.0
+
+        # Valid EVM address pattern (required by Robinhood Chain Blockscout)
+        # Reject non-hex identifiers (e.g. NOXA launchpad format: h5ncipdmz5qcb...)
+    @staticmethod
+    def _is_valid_evm_address(addr: str) -> bool:
+        """Return True if addr matches ^0x[a-fA-F0-9]{40}$."""
+        return bool(addr and EVM_ADDR_RE.match(addr))
 
     def _rate_limit(self) -> None:
         elapsed = time.time() - self._last_request_time
@@ -93,6 +103,8 @@ class BlockscoutClient:
 
     def get_token_info(self, address: str) -> Optional[dict]:
         """GET /tokens/{address} — token metadata."""
+        if not self._is_valid_evm_address(address):
+            return None
         return self._get(f"/tokens/{address}")
 
     def get_token_holders(self, address: str, limit: int = 50) -> List[dict]:
@@ -101,6 +113,9 @@ class BlockscoutClient:
         NOTE: Robinhood Chain Blockscout does NOT accept `limit` param.
         Returns all available holders.
         """
+        if not self._is_valid_evm_address(address):
+            logger.debug("Skipping holders fetch — invalid address: %s", address[:20])
+            return []
         data = self._get(f"/tokens/{address}/holders")
         if not data or not data.get("items"):
             return []
@@ -133,6 +148,9 @@ class BlockscoutClient:
 
     def get_token_holder_count(self, address: str) -> int:
         """Get holder count via /counters endpoint."""
+        if not self._is_valid_evm_address(address):
+            logger.debug("Skipping holder count — invalid address: %s", address[:20])
+            return 0
         data = self._get(f"/tokens/{address}/counters")
         if not data:
             return 0
