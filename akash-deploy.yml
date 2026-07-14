@@ -3,10 +3,11 @@ version: "2.0"
 
 services:
   catecoin-scanner:
-    image: ghcr.io/toxmon/catecoin-scanner:sha-fd9e933
+    image: ghcr.io/toxmon/catecoin-scanner:sha-d3b703e
     env:
       - TELEGRAM_BOT_TOKEN=8978112955:AAGeQYeosjbKiMykv1YVBAPHyVqeowi9vC0
       - TELEGRAM_CHAT_ID=6748258274
+      - STATE_DIR=/data/state
     expose:
       - port: 8080
         as: 80
@@ -22,7 +23,11 @@ profiles:
         memory:
           size: 512Mi
         storage:
-          size: 1Gi
+          - size: 1Gi
+          - size: 5Gi
+            attributes:
+              persistent: true
+              class: beta2
 
   placement:
     akash:

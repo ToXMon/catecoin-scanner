@@ -204,7 +204,14 @@ class SmartMoneyTracker:
 
         # GLOBAL persistent dedup: flat set of token_addrs alerted by ANY wallet.
         # Prevents the same token being re-alerted across wallets and container restarts.
-        self.dedup_file = os.path.join(os.path.dirname(self.wallets_file), "alerted_tokens.json")
+        # Respect STATE_DIR for Akash persistent volume mount.
+        state_dir = os.environ.get("STATE_DIR", "")
+        dedup_filename = "alerted_tokens.json"
+        if state_dir:
+            os.makedirs(state_dir, exist_ok=True)
+            self.dedup_file = os.path.join(state_dir, dedup_filename)
+        else:
+            self.dedup_file = os.path.join(os.path.dirname(self.wallets_file), dedup_filename)
         self.global_alerted: Dict[str, dict] = {}  # token_addr -> {first_alerted, last_alerted, count}
         self.re_alert_cooldown_hours = sm_cfg.get("re_alert_cooldown_hours", 24)
         self._load_global_dedup()

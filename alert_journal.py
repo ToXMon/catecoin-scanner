@@ -42,6 +42,10 @@ class AlertJournal:
         enabled: bool = True,
         intervals: Optional[List[str]] = None,
     ) -> None:
+        # Respect STATE_DIR env var for persistent storage (e.g. Akash /data mount)
+        state_dir = os.environ.get("STATE_DIR", "")
+        if state_dir and not os.path.isabs(db_path):
+            db_path = os.path.join(state_dir, db_path)
         self.db_path = db_path
         self.enabled = enabled
         self.intervals = intervals or ["15m", "1h", "4h", "24h", "48h"]
