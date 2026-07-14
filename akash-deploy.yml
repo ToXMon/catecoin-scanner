@@ -7,11 +7,6 @@ services:
     env:
       - TELEGRAM_BOT_TOKEN=8978112955:AAGeQYeosjbKiMykv1YVBAPHyVqeowi9vC0
       - TELEGRAM_CHAT_ID=6748258274
-      - STATE_DIR=/data/state
-    params:
-      storage:
-        data:
-          mount: /data
     expose:
       - port: 8080
         as: 80
@@ -27,13 +22,7 @@ profiles:
         memory:
           size: 512Mi
         storage:
-          - name: root
-            size: 1Gi
-          - name: data
-            size: 5Gi
-            attributes:
-              persistent: true
-              class: beta2
+          size: 1Gi
 
   placement:
     akash:
