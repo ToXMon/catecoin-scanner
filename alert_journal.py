@@ -407,6 +407,161 @@ class AlertJournal:
         logger.info("Exported %d completed alerts to %s", len(records), output_path)
         return len(records)
 
+    def _alert_with_outcomes(self, conn: sqlite3.Connection, alert: sqlite3.Row) -> dict:
+        """Return one alert row plus attached price-tracking outcomes."""
+        checks = conn.execute(
+            "SELECT * FROM price_tracking WHERE alert_id = ? ORDER BY check_timestamp",
+            (alert["alert_id"],),
+        ).fetchall()
+        outcomes = {
+            c["check_interval"]: {
+                "check_timestamp": c["check_timestamp"],
+                "price_usd": c["price_usd"],
+                "liquidity_usd": c["liquidity_usd"],
+                "volume_24h": c["volume_24h"],
+                "price_change_pct": c["price_change_pct"],
+                "max_price_usd": c["max_price_usd"],
+                "min_price_usd": c["min_price_usd"],
+                "max_drawdown_pct": c["max_drawdown_pct"],
+            }
+            for c in checks
+        }
+        rec = dict(alert)
+        rec["outcomes"] = outcomes
+        changes = [c["price_change_pct"] for c in checks if c["price_change_pct"] is not None]
+        rec["max_return_pct"] = max(changes) if changes else None
+        rec["min_return_pct"] = min(changes) if changes else None
+        rec["latest_return_pct"] = changes[-1] if changes else None
+        return rec
+
+    def completed_records(self, limit: int = 1000) -> List[dict]:
+        """Return completed alerts with attached outcomes for API/export use."""
+        if not self.enabled:
+            return []
+        with self._conn() as conn:
+            alerts = conn.execute(
+                "SELECT * FROM alerts WHERE tracking_complete = 1 ORDER BY timestamp DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+            return [self._alert_with_outcomes(conn, a) for a in alerts]
+
+    def recent_alerts(self, limit: int = 50) -> List[dict]:
+        """Return recent alerts with any available outcomes."""
+        if not self.enabled:
+            return []
+        with self._conn() as conn:
+            alerts = conn.execute(
+                "SELECT * FROM alerts ORDER BY timestamp DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+            return [self._alert_with_outcomes(conn, a) for a in alerts]
+
+    def wallet_stats(self, min_alerts: int = 1) -> List[dict]:
+        """Return wallet performance leaderboard from completed outcomes."""
+        if not self.enabled:
+            return []
+        rows: Dict[str, dict] = {}
+        with self._conn() as conn:
+            alerts = conn.execute("SELECT * FROM alerts ORDER BY timestamp ASC").fetchall()
+            for alert in alerts:
+                key = alert["wallet_label"] or alert["wallet_address"] or "unknown"
+                if key not in rows:
+                    rows[key] = {
+                        "wallet": key,
+                        "wallet_address": alert["wallet_address"],
+                        "wallet_tier": alert["wallet_tier"],
+                        "alerts": 0,
+                        "completed": 0,
+                        "wins_15m": 0,
+                        "wins_1h": 0,
+                        "wins_4h": 0,
+                        "wins_24h": 0,
+                        "wins_48h": 0,
+                        "max_returns": [],
+                        "latest_returns": [],
+                        "drawdowns": [],
+                    }
+                stat = rows[key]
+                stat["alerts"] += 1
+                checks = conn.execute(
+                    "SELECT check_interval, price_change_pct, max_drawdown_pct FROM price_tracking WHERE alert_id = ?",
+                    (alert["alert_id"],),
+                ).fetchall()
+                if checks:
+                    changes = [c["price_change_pct"] for c in checks if c["price_change_pct"] is not None]
+                    dds = [c["max_drawdown_pct"] for c in checks if c["max_drawdown_pct"] is not None]
+                    if changes:
+                        stat["max_returns"].append(max(changes))
+                        stat["latest_returns"].append(changes[-1])
+                    if dds:
+                        stat["drawdowns"].append(min(dds))
+                    if alert["tracking_complete"]:
+                        stat["completed"] += 1
+                    for c in checks:
+                        interval = c["check_interval"]
+                        if c["price_change_pct"] is not None and c["price_change_pct"] > 0:
+                            field = f"wins_{interval}"
+                            if field in stat:
+                                stat[field] += 1
+        out = []
+        for stat in rows.values():
+            if stat["alerts"] < min_alerts:
+                continue
+            completed = max(stat["completed"], 1)
+            max_returns = stat.pop("max_returns")
+            latest_returns = stat.pop("latest_returns")
+            drawdowns = stat.pop("drawdowns")
+            stat["avg_max_return_pct"] = sum(max_returns) / len(max_returns) if max_returns else None
+            stat["avg_latest_return_pct"] = sum(latest_returns) / len(latest_returns) if latest_returns else None
+            stat["avg_max_drawdown_pct"] = sum(drawdowns) / len(drawdowns) if drawdowns else None
+            for interval in ["15m", "1h", "4h", "24h", "48h"]:
+                wins = stat.get(f"wins_{interval}", 0)
+                stat[f"win_rate_{interval}"] = wins / completed if stat["completed"] else None
+            edge = 0.0
+            if stat["avg_max_return_pct"] is not None:
+                edge += stat["avg_max_return_pct"]
+            if stat["avg_max_drawdown_pct"] is not None:
+                edge += stat["avg_max_drawdown_pct"] * 0.5
+            stat["edge_score"] = edge
+            out.append(stat)
+        return sorted(out, key=lambda r: (r["edge_score"], r["completed"], r["alerts"]), reverse=True)
+
+    def queue_items(self, limit: int = 100) -> List[dict]:
+        """Return current trade queue derived from recent alert outcomes."""
+        items = []
+        for rec in self.recent_alerts(limit=limit):
+            liq = rec.get("liquidity_usd") or 0
+            fdv = rec.get("fdv") or rec.get("market_cap") or 0
+            ratio = rec.get("liq_mcap_ratio")
+            latest = rec.get("latest_return_pct")
+            max_ret = rec.get("max_return_pct")
+            age_s = int(time.time()) - int(rec.get("timestamp") or time.time())
+            state = "observe"
+            reasons = []
+            if liq >= 10000:
+                reasons.append("liquidity>=10k")
+            if ratio is not None and ratio >= 0.08:
+                reasons.append("liq_fdv>=8pct")
+            if rec.get("wallet_tier") in ("smart_money_elite", "sniper"):
+                reasons.append("strong_wallet_tier")
+            if len(reasons) >= 2:
+                state = "candidate"
+            if latest is not None and latest > 0 and age_s >= 15 * 60 and state == "candidate":
+                state = "entry_ready"
+            if max_ret is not None and max_ret >= 50:
+                state = "take_profit_watch"
+            if latest is not None and latest <= -25:
+                state = "avoid_or_cut"
+            rec["queue_state"] = state
+            rec["queue_reasons"] = reasons
+            rec["age_seconds"] = age_s
+            items.append(rec)
+        return items
+
+    def export_jsonl_text(self, limit: int = 1000) -> str:
+        """Return completed records as JSONL string for HTTP download."""
+        return "\n".join(json.dumps(r) for r in self.completed_records(limit=limit)) + "\n"
+
     def stats(self) -> dict:
         """Return summary stats for monitoring."""
         if not self.enabled:
@@ -417,6 +572,7 @@ class AlertJournal:
                 complete = conn.execute(
                     "SELECT COUNT(*) as c FROM alerts WHERE tracking_complete = 1"
                 ).fetchone()["c"]
+                checks = conn.execute("SELECT COUNT(*) as c FROM price_tracking").fetchone()["c"]
                 profitable = conn.execute(
                     """
                     SELECT COUNT(*) as c FROM price_tracking pt
@@ -424,12 +580,35 @@ class AlertJournal:
                     WHERE pt.check_interval = '48h' AND pt.price_change_pct > 0
                     """
                 ).fetchone()["c"]
+                intervals = {}
+                for interval in self.intervals:
+                    row = conn.execute(
+                        """
+                        SELECT COUNT(*) as n,
+                               SUM(CASE WHEN price_change_pct > 0 THEN 1 ELSE 0 END) as wins,
+                               AVG(price_change_pct) as avg_change
+                        FROM price_tracking WHERE check_interval = ?
+                        """,
+                        (interval,),
+                    ).fetchone()
+                    n = row["n"] or 0
+                    wins = row["wins"] or 0
+                    intervals[interval] = {
+                        "checks": n,
+                        "wins": wins,
+                        "win_rate": (wins / n) if n else None,
+                        "avg_change_pct": row["avg_change"],
+                    }
                 return {
                     "enabled": True,
+                    "db_path": self.db_path,
                     "total_alerts": total,
                     "tracking_complete": complete,
+                    "price_checks": checks,
                     "profitable_48h": profitable,
+                    "completion_rate": (complete / total) if total else 0,
+                    "intervals": intervals,
                 }
         except Exception as e:
             logger.error("stats failed: %s", e)
-            return {"enabled": True, "error": str(e)}
+            return {"enabled": True, "error": str(e), "db_path": self.db_path}
