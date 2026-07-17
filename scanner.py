@@ -42,6 +42,7 @@ from whale_monitor import WhaleMonitor
 from zombie_detector import ZombieDetector
 from liquidity_flow import LiquidityFlowAnalyzer
 from reversal_detector import ReversalDetector
+from base_scanner import run_dry_scan as run_base_dry_scan
 
 try:
     import yaml
@@ -275,6 +276,25 @@ class CatecoinScanner:
 config_cate_address = "0xfc5ABD01E4Def799549eee154449Ff6a7ae0cAc7"
 
 
+
+def _run_base_scanner_once(config: dict) -> int:
+    """Run one Base-chain dry scan cycle, logging observations without Telegram by default."""
+    base_cfg = config.get("base_scanner", {}) or {}
+    if not base_cfg.get("enabled", False):
+        return 0
+    max_pairs = int(base_cfg.get("max_pairs", 20))
+    journal_db = base_cfg.get("journal_db_path") or config.get("journal", {}).get("db_path", "state/alert_journal.db")
+    chains_config = config.get("chains_config_path", "chains.yaml")
+    result = run_base_dry_scan(max_pairs=max_pairs, journal_db=journal_db, chains_config=chains_config, observation_cooldown_hours=float(base_cfg.get("observation_cooldown_hours", 6)))
+    logger.info(
+        "Base scanner: scanned=%d logged=%d queue=%s alert_worthy=%d telegram=dry-run",
+        result.get("pairs_scanned", 0),
+        result.get("observations_logged", 0),
+        result.get("queue_counts", {}),
+        result.get("alert_worthy_count", 0),
+    )
+    return int(result.get("alert_worthy_count", 0) or 0)
+
 # ---------------------------------------------------------------------------
 # Main CLI
 # ---------------------------------------------------------------------------
@@ -428,7 +448,15 @@ def main():
         except Exception as e:
             logger.error("Reversal detector error: %s", e, exc_info=True)
 
-        logger.info("=== All modules complete: %d total alerts sent ===", total_alerts)
+        # Module 8: Base Chain Scanner (dry-run journal observations)
+        if (config.get("base_scanner", {}) or {}).get("enabled", False):
+            try:
+                logger.info("--- Base Chain Scanner (dry-run journal) ---")
+                _run_base_scanner_once(config)
+            except Exception as e:
+                logger.error("Base scanner error: %s", e, exc_info=True)
+
+        logger.info("=== All modules complete: %d total Telegram alerts sent ===", total_alerts)
         return
 
     # Full multi-module loop
@@ -452,6 +480,7 @@ def main():
     zombie_interval = config.get("zombie_detector", {}).get("poll_interval_seconds", 1800)
     liq_interval = config.get("liquidity_flow", {}).get("poll_interval_seconds", 600)
     reversal_interval = config.get("reversal", {}).get("poll_interval_seconds", 900)
+    base_interval = config.get("base_scanner", {}).get("poll_interval_seconds", 900)
 
     last_sm = 0.0
     last_disc = 0.0
@@ -459,10 +488,11 @@ def main():
     last_zombie = 0.0
     last_liq = 0.0
     last_reversal = 0.0
+    last_base = 0.0
 
     logger.info(
-        "Intervals: price=%ds sm=%ds disc=%ds whale=%ds zombie=%ds liq=%ds",
-        price_interval, sm_interval, disc_interval, whale_interval, zombie_interval, liq_interval,
+        "Intervals: price=%ds sm=%ds disc=%ds whale=%ds zombie=%ds liq=%ds base=%ds",
+        price_interval, sm_interval, disc_interval, whale_interval, zombie_interval, liq_interval, base_interval,
     )
 
     while True:
@@ -533,6 +563,14 @@ def main():
             except Exception as e:
                 logger.error("Reversal detector error: %s", e)
             last_reversal = now
+
+        # Base chain scanner (silent journal observations)
+        if now - last_base >= base_interval:
+            try:
+                _run_base_scanner_once(config)
+            except Exception as e:
+                logger.error("Base scanner error: %s", e)
+            last_base = now
 
         time.sleep(price_interval)
 

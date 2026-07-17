@@ -1,0 +1,41 @@
+# Chain registry for inherited scanner modules.
+# Secrets are intentionally referenced by env var name only.
+chains:
+  robinhood:
+    name: Robinhood Chain
+    chain_id: 4663
+    dexscreener_chain: robinhood
+    native_symbol: ETH
+    rpc_env: ROBINHOOD_RPC_URL
+    alchemy_api_key_env: ALCHEMY_API_KEY
+    alchemy_network: robinhood-mainnet
+    explorer_url: https://robinhoodchain.blockscout.com
+    default_pair_address: "0xaC366079B95E56AA2dF22dE84373e47594dc1031"
+    default_token_address: "0xfc5ABD01E4Def799549eee154449Ff6a7ae0cAc7"
+
+  base:
+    name: Base
+    chain_id: 8453
+    dexscreener_chain: base
+    native_symbol: ETH
+    rpc_env: BASE_RPC_URL
+    alchemy_api_key_env: ALCHEMY_BASE_API_KEY
+    alchemy_network: base-mainnet
+    explorer_url: https://basescan.org
+    blockscout_url: https://base.blockscout.com
+    search_queries:
+      - "base meme"
+      - "aerodrome base"
+      - "virtuals base"
+      - "toshi"
+      - "brett base"
+      - "degen base"
+    filters:
+      min_liquidity_usd: 25000
+      min_fdv_usd: 50000
+      max_fdv_usd: 10000000
+      min_liq_fdv_ratio: 0.08
+      min_volume_liquidity_ratio: 0.2
+      max_volume_liquidity_ratio: 5.0
+      candidate_score: 60
+      entry_ready_score: 75

@@ -28,9 +28,11 @@ class DexScreenerClient:
         self,
         timeout: int = REQUEST_TIMEOUT,
         max_retries: int = MAX_RETRIES,
+        default_chain: str = "robinhood",
     ) -> None:
         self.timeout = timeout
         self.max_retries = max_retries
+        self.default_chain = default_chain
         self.session = requests.Session()
         self.session.headers.update({
             "Accept": "application/json",
@@ -70,16 +72,20 @@ class DexScreenerClient:
             pair = data["pairs"][0]
         return pair
 
-    def get_token(self, token_address: str) -> Optional[Dict[str, Any]]:
-        """GET /tokens/{address} — best pair for token across chains."""
+    def get_token(self, token_address: str, chain: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """GET /tokens/{address} — best pair for token, preferring the requested chain."""
         data = self._get(f"/tokens/{token_address}")
         if not data:
             return None
         pairs = data.get("pairs") or []
         if not pairs:
             return None
-        rh = [p for p in pairs if p.get("chainId") == "robinhood"]
-        return rh[0] if rh else pairs[0]
+        preferred_chain = chain or self.default_chain
+        matches = [p for p in pairs if p.get("chainId") == preferred_chain]
+        if matches:
+            matches.sort(key=lambda p: float((p.get("liquidity") or {}).get("usd") or 0), reverse=True)
+            return matches[0]
+        return pairs[0]
 
     def search(self, query: str) -> List[Dict[str, Any]]:
         """GET /search?q={query} — search pairs/tokens."""

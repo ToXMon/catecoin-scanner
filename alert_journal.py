@@ -66,6 +66,9 @@ class AlertJournal:
 
     def _init_db(self) -> None:
         with self._conn() as conn:
+            # Create minimal tables first. Legacy databases may already have an
+            # alerts table with only a few columns, so all current columns must
+            # be ensured before indexes or queries reference them.
             conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS alerts (
@@ -73,28 +76,7 @@ class AlertJournal:
                     alert_id TEXT UNIQUE NOT NULL,
                     timestamp INTEGER NOT NULL,
                     alert_type TEXT NOT NULL,
-                    token_symbol TEXT,
-                    token_name TEXT,
-                    token_address TEXT NOT NULL,
-                    chain TEXT DEFAULT 'robinhood',
-                    price_usd REAL,
-                    liquidity_usd REAL,
-                    volume_24h REAL,
-                    market_cap REAL,
-                    fdv REAL,
-                    holders INTEGER,
-                    liq_mcap_ratio REAL,
-                    wallet_address TEXT,
-                    wallet_label TEXT,
-                    wallet_tier TEXT,
-                    wallet_score REAL,
-                    alpha_score INTEGER,
-                    risk_level TEXT,
-                    thesis TEXT,
-                    risk_factors TEXT,
-                    telegram_sent INTEGER DEFAULT 0,
-                    telegram_message_id TEXT,
-                    tracking_complete INTEGER DEFAULT 0
+                    token_address TEXT NOT NULL
                 );
 
                 CREATE TABLE IF NOT EXISTS price_tracking (
@@ -112,11 +94,94 @@ class AlertJournal:
                     UNIQUE(alert_id, check_interval),
                     FOREIGN KEY (alert_id) REFERENCES alerts(alert_id)
                 );
-
+                """
+            )
+            self._ensure_alert_columns(conn)
+            conn.executescript(
+                """
                 CREATE INDEX IF NOT EXISTS idx_alerts_timestamp ON alerts(timestamp);
+                CREATE INDEX IF NOT EXISTS idx_alerts_chain ON alerts(chain);
+                CREATE INDEX IF NOT EXISTS idx_alerts_pair_chain ON alerts(chain, pair_address, timestamp);
+                CREATE INDEX IF NOT EXISTS idx_alerts_token_chain ON alerts(chain, token_address, timestamp);
+                CREATE INDEX IF NOT EXISTS idx_alerts_queue_state ON alerts(queue_state);
                 CREATE INDEX IF NOT EXISTS idx_tracking_alert ON price_tracking(alert_id);
                 """
             )
+
+    def _ensure_alert_columns(self, conn: sqlite3.Connection) -> None:
+        """Add columns introduced after the inherited Robinhood journal schema."""
+        existing = {row[1] for row in conn.execute("PRAGMA table_info(alerts)").fetchall()}
+        columns = {
+            "alert_id": "TEXT",
+            "timestamp": "INTEGER DEFAULT 0",
+            "alert_type": "TEXT DEFAULT 'unknown'",
+            "token_symbol": "TEXT",
+            "token_name": "TEXT",
+            "token_address": "TEXT DEFAULT ''",
+            "chain": "TEXT DEFAULT 'robinhood'",
+            "price_usd": "REAL",
+            "liquidity_usd": "REAL",
+            "volume_24h": "REAL",
+            "market_cap": "REAL",
+            "fdv": "REAL",
+            "holders": "INTEGER",
+            "liq_mcap_ratio": "REAL",
+            "wallet_address": "TEXT",
+            "wallet_label": "TEXT",
+            "wallet_tier": "TEXT",
+            "wallet_score": "REAL",
+            "alpha_score": "INTEGER",
+            "risk_level": "TEXT",
+            "thesis": "TEXT",
+            "risk_factors": "TEXT",
+            "telegram_sent": "INTEGER DEFAULT 0",
+            "telegram_message_id": "TEXT",
+            "queue_state": "TEXT DEFAULT 'observe'",
+            "queue_reasons": "TEXT",
+            "trade_plan_json": "TEXT",
+            "alert_worthy": "INTEGER DEFAULT 0",
+            "confidence": "TEXT",
+            "pair_address": "TEXT",
+            "dex_url": "TEXT",
+            "tracking_complete": "INTEGER DEFAULT 0",
+        }
+        for name, ddl in columns.items():
+            if name not in existing:
+                conn.execute(f"ALTER TABLE alerts ADD COLUMN {name} {ddl}")
+
+    def find_recent_observation(
+        self,
+        *,
+        chain: str,
+        pair_address: str = "",
+        token_address: str = "",
+        since_ts: int,
+    ) -> Optional[dict]:
+        """Return most recent alert for a chain+pair/token since timestamp."""
+        if not self.enabled:
+            return None
+        clauses = ["chain = ?", "timestamp >= ?"]
+        params: List[Any] = [chain, since_ts]
+        identity_clauses = []
+        if pair_address:
+            identity_clauses.append("pair_address = ?")
+            params.append(pair_address)
+        if token_address:
+            identity_clauses.append("token_address = ?")
+            params.append(token_address)
+        if not identity_clauses:
+            return None
+        where = " AND ".join(clauses) + " AND (" + " OR ".join(identity_clauses) + ")"
+        try:
+            with self._conn() as conn:
+                row = conn.execute(
+                    f"SELECT * FROM alerts WHERE {where} ORDER BY timestamp DESC LIMIT 1",
+                    params,
+                ).fetchone()
+                return dict(row) if row else None
+        except Exception as e:
+            logger.error("find_recent_observation failed: %s", e)
+            return None
 
     def log_alert(self, data: Dict[str, Any]) -> Optional[str]:
         """Insert alert, return alert_id (UUID). Returns None if disabled."""
@@ -141,8 +206,9 @@ class AlertJournal:
                         holders, liq_mcap_ratio,
                         wallet_address, wallet_label, wallet_tier, wallet_score,
                         alpha_score, risk_level, thesis, risk_factors,
-                        telegram_sent
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        telegram_sent, queue_state, queue_reasons, trade_plan_json,
+                        alert_worthy, confidence, pair_address, dex_url
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         alert_id,
@@ -157,7 +223,7 @@ class AlertJournal:
                         float(data.get("volume_24h", 0) or 0),
                         float(data.get("market_cap", 0) or 0),
                         float(data.get("fdv", 0) or 0),
-                        int(data.get("holders", 0) or 0),
+                        None if data.get("holders") is None else int(data.get("holders", 0) or 0),
                         liq_mcap,
                         data.get("wallet_address", ""),
                         data.get("wallet_label", ""),
@@ -168,6 +234,13 @@ class AlertJournal:
                         data.get("thesis", ""),
                         data.get("risk_factors", ""),
                         1 if data.get("telegram_sent", False) else 0,
+                        data.get("queue_state", "observe"),
+                        json.dumps(data.get("queue_reasons", [])),
+                        json.dumps(data.get("trade_plan", {})),
+                        1 if data.get("alert_worthy", False) else 0,
+                        data.get("confidence", ""),
+                        data.get("pair_address", ""),
+                        data.get("dex_url", ""),
                     ),
                 )
             logger.debug("Logged alert %s for %s", alert_id, data.get("token_symbol", "?"))
@@ -289,13 +362,17 @@ class AlertJournal:
             token_addr = alert["token_address"]
             alert_price = alert["price_usd"] or 0.0
             alert_id = alert["alert_id"]
+            chain = alert["chain"] or "robinhood"
 
             # Validate address for DexScreener
             if not token_addr or not token_addr.startswith("0x") or len(token_addr) < 42:
                 continue
 
             try:
-                pair = dexscreener_client.get_token(token_addr) or {}
+                try:
+                    pair = dexscreener_client.get_token(token_addr, chain=chain) or {}
+                except TypeError:
+                    pair = dexscreener_client.get_token(token_addr) or {}
                 price = float(pair.get("priceUsd", 0) or 0)
                 liquidity = float((pair.get("liquidity") or {}).get("usd", 0) or 0)
                 volume = float((pair.get("volume") or {}).get("h24", 0) or 0)
@@ -318,7 +395,7 @@ class AlertJournal:
             logger.info("Price tracker: %d checks across %d alerts", checks_done, len(alerts))
         return checks_done
 
-    def export_jsonl(self, output_path: str, min_alerts: int = 0) -> int:
+    def export_jsonl(self, output_path: str, min_alerts: int = 0, chain: Optional[str] = None) -> int:
         """Export completed alerts as JSONL for LLM training."""
         if not self.enabled:
             return 0
@@ -328,9 +405,15 @@ class AlertJournal:
         records: List[dict] = []
         try:
             with self._conn() as conn:
-                alerts = conn.execute(
-                    "SELECT * FROM alerts WHERE tracking_complete = 1 ORDER BY timestamp ASC"
-                ).fetchall()
+                if chain:
+                    alerts = conn.execute(
+                        "SELECT * FROM alerts WHERE tracking_complete = 1 AND chain = ? ORDER BY timestamp ASC",
+                        (chain,),
+                    ).fetchall()
+                else:
+                    alerts = conn.execute(
+                        "SELECT * FROM alerts WHERE tracking_complete = 1 ORDER BY timestamp ASC"
+                    ).fetchall()
 
                 for alert in alerts:
                     aid = alert["alert_id"]
@@ -367,6 +450,7 @@ class AlertJournal:
                             "alert_id": aid,
                             "alert_type": alert["alert_type"],
                             "timestamp": alert["timestamp"],
+                            "chain": alert["chain"],
                             "token_symbol": alert["token_symbol"],
                             "token_address": alert["token_address"],
                             "price_at_alert": alert_price,
@@ -427,6 +511,15 @@ class AlertJournal:
             for c in checks
         }
         rec = dict(alert)
+        for key in ("queue_reasons", "trade_plan_json"):
+            if rec.get(key):
+                try:
+                    rec[key] = json.loads(rec[key])
+                except (TypeError, json.JSONDecodeError):
+                    pass
+        if "trade_plan_json" in rec:
+            rec["trade_plan"] = rec.get("trade_plan_json") or {}
+        rec["alert_worthy"] = bool(rec.get("alert_worthy"))
         rec["outcomes"] = outcomes
         changes = [c["price_change_pct"] for c in checks if c["price_change_pct"] is not None]
         rec["max_return_pct"] = max(changes) if changes else None
@@ -434,26 +527,38 @@ class AlertJournal:
         rec["latest_return_pct"] = changes[-1] if changes else None
         return rec
 
-    def completed_records(self, limit: int = 1000) -> List[dict]:
+    def completed_records(self, limit: int = 1000, chain: Optional[str] = None) -> List[dict]:
         """Return completed alerts with attached outcomes for API/export use."""
         if not self.enabled:
             return []
         with self._conn() as conn:
-            alerts = conn.execute(
-                "SELECT * FROM alerts WHERE tracking_complete = 1 ORDER BY timestamp DESC LIMIT ?",
-                (limit,),
-            ).fetchall()
+            if chain:
+                alerts = conn.execute(
+                    "SELECT * FROM alerts WHERE tracking_complete = 1 AND chain = ? ORDER BY timestamp DESC LIMIT ?",
+                    (chain, limit),
+                ).fetchall()
+            else:
+                alerts = conn.execute(
+                    "SELECT * FROM alerts WHERE tracking_complete = 1 ORDER BY timestamp DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
             return [self._alert_with_outcomes(conn, a) for a in alerts]
 
-    def recent_alerts(self, limit: int = 50) -> List[dict]:
+    def recent_alerts(self, limit: int = 50, chain: Optional[str] = None) -> List[dict]:
         """Return recent alerts with any available outcomes."""
         if not self.enabled:
             return []
         with self._conn() as conn:
-            alerts = conn.execute(
-                "SELECT * FROM alerts ORDER BY timestamp DESC LIMIT ?",
-                (limit,),
-            ).fetchall()
+            if chain:
+                alerts = conn.execute(
+                    "SELECT * FROM alerts WHERE chain = ? ORDER BY timestamp DESC LIMIT ?",
+                    (chain, limit),
+                ).fetchall()
+            else:
+                alerts = conn.execute(
+                    "SELECT * FROM alerts ORDER BY timestamp DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
             return [self._alert_with_outcomes(conn, a) for a in alerts]
 
     def wallet_stats(self, min_alerts: int = 1) -> List[dict]:
@@ -526,10 +631,14 @@ class AlertJournal:
             out.append(stat)
         return sorted(out, key=lambda r: (r["edge_score"], r["completed"], r["alerts"]), reverse=True)
 
-    def queue_items(self, limit: int = 100) -> List[dict]:
+    def queue_items(self, limit: int = 100, chain: Optional[str] = None) -> List[dict]:
         """Return current trade queue derived from recent alert outcomes."""
         items = []
-        for rec in self.recent_alerts(limit=limit):
+        for rec in self.recent_alerts(limit=limit, chain=chain):
+            if rec.get("queue_state") and rec.get("trade_plan"):
+                rec["age_seconds"] = int(time.time()) - int(rec.get("timestamp") or time.time())
+                items.append(rec)
+                continue
             liq = rec.get("liquidity_usd") or 0
             fdv = rec.get("fdv") or rec.get("market_cap") or 0
             ratio = rec.get("liq_mcap_ratio")
@@ -558,28 +667,53 @@ class AlertJournal:
             items.append(rec)
         return items
 
-    def export_jsonl_text(self, limit: int = 1000) -> str:
+    def export_jsonl_text(self, limit: int = 1000, chain: Optional[str] = None) -> str:
         """Return completed records as JSONL string for HTTP download."""
-        return "\n".join(json.dumps(r) for r in self.completed_records(limit=limit)) + "\n"
+        return "\n".join(json.dumps(r) for r in self.completed_records(limit=limit, chain=chain)) + "\n"
 
-    def stats(self) -> dict:
+    def stats(self, chain: Optional[str] = None) -> dict:
         """Return summary stats for monitoring."""
         if not self.enabled:
             return {"enabled": False}
         try:
             with self._conn() as conn:
-                total = conn.execute("SELECT COUNT(*) as c FROM alerts").fetchone()["c"]
-                complete = conn.execute(
-                    "SELECT COUNT(*) as c FROM alerts WHERE tracking_complete = 1"
-                ).fetchone()["c"]
-                checks = conn.execute("SELECT COUNT(*) as c FROM price_tracking").fetchone()["c"]
-                profitable = conn.execute(
-                    """
-                    SELECT COUNT(*) as c FROM price_tracking pt
-                    JOIN alerts a ON pt.alert_id = a.alert_id
-                    WHERE pt.check_interval = '48h' AND pt.price_change_pct > 0
-                    """
-                ).fetchone()["c"]
+                if chain:
+                    total = conn.execute("SELECT COUNT(*) as c FROM alerts WHERE chain = ?", (chain,)).fetchone()["c"]
+                    complete = conn.execute(
+                        "SELECT COUNT(*) as c FROM alerts WHERE tracking_complete = 1 AND chain = ?",
+                        (chain,),
+                    ).fetchone()["c"]
+                else:
+                    total = conn.execute("SELECT COUNT(*) as c FROM alerts").fetchone()["c"]
+                    complete = conn.execute(
+                        "SELECT COUNT(*) as c FROM alerts WHERE tracking_complete = 1"
+                    ).fetchone()["c"]
+                if chain:
+                    checks = conn.execute(
+                        """
+                        SELECT COUNT(*) as c FROM price_tracking pt
+                        JOIN alerts a ON pt.alert_id = a.alert_id
+                        WHERE a.chain = ?
+                        """,
+                        (chain,),
+                    ).fetchone()["c"]
+                    profitable = conn.execute(
+                        """
+                        SELECT COUNT(*) as c FROM price_tracking pt
+                        JOIN alerts a ON pt.alert_id = a.alert_id
+                        WHERE a.chain = ? AND pt.check_interval = '48h' AND pt.price_change_pct > 0
+                        """,
+                        (chain,),
+                    ).fetchone()["c"]
+                else:
+                    checks = conn.execute("SELECT COUNT(*) as c FROM price_tracking").fetchone()["c"]
+                    profitable = conn.execute(
+                        """
+                        SELECT COUNT(*) as c FROM price_tracking pt
+                        JOIN alerts a ON pt.alert_id = a.alert_id
+                        WHERE pt.check_interval = '48h' AND pt.price_change_pct > 0
+                        """
+                    ).fetchone()["c"]
                 intervals = {}
                 for interval in self.intervals:
                     row = conn.execute(
@@ -587,9 +721,11 @@ class AlertJournal:
                         SELECT COUNT(*) as n,
                                SUM(CASE WHEN price_change_pct > 0 THEN 1 ELSE 0 END) as wins,
                                AVG(price_change_pct) as avg_change
-                        FROM price_tracking WHERE check_interval = ?
+                        FROM price_tracking pt
+                        JOIN alerts a ON pt.alert_id = a.alert_id
+                        WHERE pt.check_interval = ? AND (? IS NULL OR a.chain = ?)
                         """,
-                        (interval,),
+                        (interval, chain, chain),
                     ).fetchone()
                     n = row["n"] or 0
                     wins = row["wins"] or 0
@@ -602,6 +738,7 @@ class AlertJournal:
                 return {
                     "enabled": True,
                     "db_path": self.db_path,
+                    "chain": chain,
                     "total_alerts": total,
                     "tracking_complete": complete,
                     "price_checks": checks,

@@ -66,7 +66,8 @@ class HealthHandler(BaseHTTPRequestHandler):
             journal = self._journal()
 
             if path == "/journal/stats":
-                self._send_json(journal.stats())
+                chain = query.get("chain") or None
+                self._send_json(journal.stats(chain=chain))
                 return
 
             if path == "/journal/export.jsonl":
@@ -79,7 +80,8 @@ class HealthHandler(BaseHTTPRequestHandler):
 
             if path == "/journal/recent":
                 limit = self._limit(query, default=50, max_value=500)
-                self._send_json({"alerts": journal.recent_alerts(limit=limit)})
+                chain = query.get("chain") or None
+                self._send_json({"alerts": journal.recent_alerts(limit=limit, chain=chain)})
                 return
 
             if path == "/wallet/stats":
@@ -93,7 +95,8 @@ class HealthHandler(BaseHTTPRequestHandler):
 
             if path == "/queue":
                 limit = self._limit(query, default=100, max_value=500)
-                items = journal.queue_items(limit=limit)
+                chain = query.get("chain") or None
+                items = journal.queue_items(limit=limit, chain=chain)
                 grouped: Dict[str, list] = {}
                 for item in items:
                     grouped.setdefault(item.get("queue_state", "observe"), []).append(item)

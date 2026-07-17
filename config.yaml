@@ -3,6 +3,8 @@
 # === Price Monitor ===
 pair_address: "0xaC366079B95E56AA2dF22dE84373e47594dc1031"
 chain: "robinhood"
+chains_config_path: "chains.yaml"
+active_chains: ["robinhood", "base"]
 cate_token_address: "0xfc5ABD01E4Def799549eee154449Ff6a7ae0cAc7"
 
 baseline_override: null
@@ -40,14 +42,14 @@ smart_money:
   consensus_moderate_weight: 0.8
   consensus_strong_30min: 2
   consensus_moderate_30min: 1
-  min_wallet_score: 35  # Lowered to catch whale-tier holders (Cate Top Holder #3 scores 42.5)
+  min_wallet_score: 60  # Tightened: log weak observations, Telegram only stronger queue candidates
   blockscout_base: "https://robinhoodchain.blockscout.com/api/v2"
 
 # === Token Discovery ===
 discovery:
   enabled: true
   poll_interval_seconds: 600
-  min_liquidity_usd: 5000
+  min_liquidity_usd: 10000
   min_volume_24h: 10000
   min_holders: 10
   zombie_dormancy_days: 7
@@ -89,14 +91,35 @@ liquidity_flow:
       symbol: "CATE"
   blockscout_base: "https://robinhoodchain.blockscout.com/api/v2"
 
+# === Base Chain Scanner (silent observations + queue transitions) ===
+base_scanner:
+  enabled: true
+  dry_run: true
+  poll_interval_seconds: 900
+  max_pairs: 20
+  observation_cooldown_hours: 6
+  journal_db_path: "state/alert_journal.db"
+  telegram_enabled: false  # preserve Telegram; Base logs observations only until explicitly enabled
+
+# === Queue/Telegram Policy (noise suppression) ===
+alert_policy:
+  log_observations: true
+  telegram_min_queue_state: "candidate"
+  telegram_states: ["candidate", "entry_ready", "take_profit", "stop", "expired"]
+  robinhood_min_alpha_score: 60
+  robinhood_min_liquidity_usd: 10000
+  robinhood_min_buy_value_usd: 500
+  base_candidate_score: 60
+  base_entry_ready_score: 75
+
 # === Telegram ===
 telegram_config_source: "robinhood-alpha"
 robinhood_alpha_config_path: "/a0/usr/workdir/robinhood-alpha/config.yaml"
 
 # === Alpha Quality Filters (NEW — Noise Suppression) ===
 alpha:
-  min_buy_value_usd: 100
-  min_liquidity_usd: 5000
+  min_buy_value_usd: 500
+  min_liquidity_usd: 10000
   min_liquidity_mcap_ratio: 0.1
   airdrop_blocklist:
     - "0x0000000000000000000000000000000000000000"

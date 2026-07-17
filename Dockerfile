@@ -5,7 +5,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY *.py *.json config.yaml ./
+COPY *.py *.json config.yaml chains.yaml ./
 
 # Health check server listens on 8080
 EXPOSE 8080
