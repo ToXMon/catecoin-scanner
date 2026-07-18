@@ -137,7 +137,7 @@ base_scanner:
 alert_analyzer:
   enabled: true
   interval_hours: 4
-  min_alerts_for_analysis: 5
+  min_alerts_for_analysis: 1
   auto_apply_thresholds: false  # data-driven threshold overrides written to scorer_adjustments.json for review
   outcome_windows: ["15m", "1h", "4h", "24h", "48h"]
   report_path: "state/analyzer_report.json"
