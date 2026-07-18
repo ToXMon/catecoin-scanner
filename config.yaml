@@ -133,6 +133,16 @@ base_scanner:
   telegram_min_queue_state: "entry_ready"  # override with BASE_SCANNER_TELEGRAM_MIN_STATE env
 
 # === Queue/Telegram Policy (noise suppression) ===
+# === Alert Self-Improvement Analyzer (4-hour cycle) ===
+alert_analyzer:
+  enabled: true
+  interval_hours: 4
+  min_alerts_for_analysis: 5
+  auto_apply_thresholds: false  # data-driven threshold overrides written to scorer_adjustments.json for review
+  outcome_windows: ["15m", "1h", "4h", "24h", "48h"]
+  report_path: "state/analyzer_report.json"
+  adjustments_path: "state/scorer_adjustments.json"
+
 alert_policy:
   log_observations: true
   telegram_min_queue_state: "candidate"

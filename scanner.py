@@ -44,6 +44,7 @@ from liquidity_flow import LiquidityFlowAnalyzer
 from reversal_detector import ReversalDetector
 from base_scanner import run_dry_scan as run_base_dry_scan
 from runner_radar import run_scan as run_runner_radar_scan
+from alert_analyzer import AlertAnalyzer
 
 try:
     import yaml
@@ -346,6 +347,28 @@ def _run_runner_radar_once(config: dict) -> int:
     )
     return int(result.get("telegram_sent", 0) or 0)
 
+
+def _run_alert_analyzer_once(config: dict) -> dict:
+    """Run one alert self-improvement analysis cycle (4-hour interval)."""
+    analyzer_cfg = config.get("alert_analyzer", {}) or {}
+    if not analyzer_cfg.get("enabled", False):
+        return {"enabled": False}
+    journal_cfg = config.get("journal", {}) or {}
+    journal_db = journal_cfg.get("db_path", "state/alert_journal.db")
+    journal = AlertJournal(db_path=journal_db, enabled=journal_cfg.get("enabled", True))
+    dex = DexScreenerClient(default_chain="robinhood")
+    analyzer = AlertAnalyzer(config=config, journal=journal, dex_client=dex)
+    result = analyzer.run_analysis()
+    logger.info(
+        "Alert analyzer: alerts=%d analyzed=%d outcomes_updated=%d recommendations=%d",
+        result.get("alerts_fetched", 0),
+        result.get("alerts_analyzed", 0),
+        result.get("outcomes_updated", 0),
+        len(result.get("recommendations", [])),
+    )
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Main CLI
 # ---------------------------------------------------------------------------
@@ -543,6 +566,7 @@ def main():
     reversal_interval = config.get("reversal", {}).get("poll_interval_seconds", 900)
     base_interval = config.get("base_scanner", {}).get("poll_interval_seconds", 900)
     runner_interval = config.get("runner_radar", {}).get("poll_interval_seconds", 120)
+    analyzer_interval = int(float(config.get("alert_analyzer", {}).get("interval_hours", 4)) * 3600)
 
     last_sm = 0.0
     last_disc = 0.0
@@ -552,10 +576,11 @@ def main():
     last_reversal = 0.0
     last_base = 0.0
     last_runner = 0.0
+    last_analyzer = 0.0
 
     logger.info(
-        "Intervals: price=%ds sm=%ds disc=%ds whale=%ds zombie=%ds liq=%ds runner=%ds base=%ds",
-        price_interval, sm_interval, disc_interval, whale_interval, zombie_interval, liq_interval, runner_interval, base_interval,
+        "Intervals: price=%ds sm=%ds disc=%ds whale=%ds zombie=%ds liq=%ds runner=%ds base=%ds analyzer=%ds",
+        price_interval, sm_interval, disc_interval, whale_interval, zombie_interval, liq_interval, runner_interval, base_interval, analyzer_interval,
     )
 
     while True:
@@ -644,6 +669,17 @@ def main():
             except Exception as e:
                 logger.error("Base scanner error: %s", e)
             last_base = now
+
+        # Alert self-improvement analyzer (4-hour cycle)
+        if now - last_analyzer >= analyzer_interval:
+            try:
+                result = _run_alert_analyzer_once(config)
+                if result and result.get("alerts_analyzed", 0) > 0:
+                    logger.info("Alert analyzer: %d alerts analyzed, %d recommendations",
+                                result.get("alerts_analyzed", 0), len(result.get("recommendations", [])))
+            except Exception as e:
+                logger.error("Alert analyzer error: %s", e)
+            last_analyzer = now
 
         time.sleep(price_interval)
 

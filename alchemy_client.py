@@ -27,7 +27,7 @@ import requests
 
 logger = logging.getLogger("catecoin-scanner.alchemy")
 
-DEFAULT_API_KEY = "RPJpfmFz_jqi4CAIc9Pe6"
+DEFAULT_API_KEY = ""
 DEFAULT_NETWORK = "robinhood-mainnet"
 REQUEST_TIMEOUT = 20
 MAX_RETRIES = 3

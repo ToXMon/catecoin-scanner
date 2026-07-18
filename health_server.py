@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
 import urllib.parse
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -101,6 +102,24 @@ class HealthHandler(BaseHTTPRequestHandler):
                 for item in items:
                     grouped.setdefault(item.get("queue_state", "observe"), []).append(item)
                 self._send_json({"items": items, "grouped": grouped})
+                return
+
+            if path == "/analyzer/report":
+                report_path = os.environ.get("ANALYZER_REPORT_PATH", "state/analyzer_report.json")
+                if os.path.exists(report_path):
+                    with open(report_path, "r", encoding="utf-8") as f:
+                        self._send_json(json.load(f))
+                else:
+                    self._send_json({"status": "no_report_yet", "message": "Analyzer has not run yet"})
+                return
+
+            if path == "/analyzer/stats":
+                adjustments_path = os.environ.get("ANALYZER_ADJUSTMENTS_PATH", "state/scorer_adjustments.json")
+                if os.path.exists(adjustments_path):
+                    with open(adjustments_path, "r", encoding="utf-8") as f:
+                        self._send_json(json.load(f))
+                else:
+                    self._send_json({"status": "no_adjustments_yet", "message": "No data-driven adjustments generated yet"})
                 return
 
             self._send_json({"error": "not_found", "path": path}, status=404)
