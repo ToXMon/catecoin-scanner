@@ -2,8 +2,9 @@
 """Base chain dry alpha scanner built from catecoin-scanner primitives.
 
 This prototype uses DexScreener's free API, writes all observations into the
-existing AlertJournal, and never sends Telegram messages. Only candidate or
-entry-ready queue states are marked alert-worthy for a future alert router.
+existing AlertJournal, and can optionally send conservative Telegram alerts when explicitly enabled.
+Only candidate or entry-ready queue states are marked alert-worthy; default live
+config sends Base entry_ready transitions only.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from typing import Any, Dict, Iterable, List, Optional
 from alert_journal import AlertJournal
 from chain_config import ChainConfig, get_chain_config
 from dexscreener import DexScreenerClient
+from telegram_alert import TelegramAlerter
 
 logger = logging.getLogger("base-alpha-scanner")
 
@@ -238,15 +240,52 @@ def observation_from_pair(pair: Dict[str, Any], metrics: Dict[str, Any], plan: D
     }
 
 
+def _state_rank(state: str) -> int:
+    return QUEUE_STATE_RANK.get(str(state or "observe"), 0)
+
+
+def _telegram_allowed(state: str, telegram_min_state: str) -> bool:
+    return _state_rank(state) >= _state_rank(telegram_min_state) and state in {"candidate", "entry_ready"}
+
+
+def _send_base_alert(alerter: TelegramAlerter, obs: Dict[str, Any]) -> bool:
+    category = "🔵 BASE ENTRY_READY" if obs["queue_state"] == "entry_ready" else "🔵 BASE CANDIDATE"
+    return alerter.send_alpha_alert(
+        symbol=obs.get("token_symbol", "UNKNOWN"),
+        name=obs.get("token_name", "UNKNOWN"),
+        contract=obs.get("token_address", ""),
+        price=float(obs.get("price_usd") or 0),
+        liquidity=float(obs.get("liquidity_usd") or 0),
+        volume_24h=float(obs.get("volume_24h") or 0),
+        holders=int(obs.get("holders") or 0),
+        alpha_score=int(obs.get("alpha_score") or 0),
+        thesis=obs.get("thesis", ""),
+        risk_level=str(obs.get("risk_level") or "MEDIUM").upper(),
+        risk_factors=obs.get("risk_factors", ""),
+        market_cap=float(obs.get("market_cap") or 0),
+        fdv=float(obs.get("fdv") or 0),
+        category=category,
+        chain="base",
+    )
+
+
 def run_dry_scan(
     max_pairs: int = 20,
     journal_db: str = DEFAULT_STATE_DB,
     chains_config: str | Path | None = None,
     observation_cooldown_hours: float = 6.0,
+    telegram_enabled: bool = False,
+    telegram_min_state: str = "entry_ready",
+    config: Optional[Dict[str, Any]] = None,
+    alerter: Optional[TelegramAlerter] = None,
+    dry_run: bool = True,
 ) -> Dict[str, Any]:
     cfg = get_chain_config("base", chains_config) if chains_config else get_chain_config("base")
     dex = DexScreenerClient()
     journal = AlertJournal(db_path=journal_db, enabled=True)
+    if dry_run:
+        telegram_enabled = False
+    alerter = alerter or (TelegramAlerter.from_config(config or {"chain": "base"}) if telegram_enabled else None)
     pairs = fetch_base_pairs(dex, cfg, max_pairs=max_pairs)
 
     observations: List[Dict[str, Any]] = []
@@ -263,12 +302,18 @@ def run_dry_scan(
             token_address=str(obs.get("token_address") or ""),
             since_ts=since_ts,
         ) if cooldown_seconds else None
+        send_now = False
         if recent:
-            old_rank = QUEUE_STATE_RANK.get(str(recent.get("queue_state") or "observe"), 0)
-            new_rank = QUEUE_STATE_RANK.get(str(obs.get("queue_state") or "observe"), 0)
+            old_rank = _state_rank(str(recent.get("queue_state") or "observe"))
+            new_rank = _state_rank(str(obs.get("queue_state") or "observe"))
             if old_rank >= new_rank:
                 skipped_duplicates += 1
                 continue
+            send_now = telegram_enabled and _telegram_allowed(obs.get("queue_state", "observe"), telegram_min_state)
+        else:
+            send_now = telegram_enabled and _telegram_allowed(obs.get("queue_state", "observe"), telegram_min_state)
+        if send_now and alerter:
+            obs["telegram_sent"] = _send_base_alert(alerter, obs)
         obs["alert_id"] = journal.log_alert(obs)
         observations.append(obs)
 
@@ -277,7 +322,7 @@ def run_dry_scan(
         counts[obs["queue_state"]] = counts.get(obs["queue_state"], 0) + 1
 
     return {
-        "mode": "dry_run",
+        "mode": "dry_run" if dry_run else "live_journal",
         "chain": cfg.as_public_dict(),
         "pairs_scanned": len(pairs),
         "observations_logged": len(observations),
@@ -285,6 +330,9 @@ def run_dry_scan(
         "observation_cooldown_hours": observation_cooldown_hours,
         "queue_counts": counts,
         "alert_worthy_count": sum(1 for obs in observations if obs["alert_worthy"]),
+        "telegram_sent": sum(1 for obs in observations if obs.get("telegram_sent")),
+        "telegram_enabled": telegram_enabled,
+        "telegram_min_state": telegram_min_state,
         "observations": observations,
     }
 

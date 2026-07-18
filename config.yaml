@@ -22,14 +22,14 @@ journal:
 
 # === Alchemy API (PRIMARY — replaces broken Blockscout address transfers) ===
 alchemy:
-  api_key: "RPJpfmFz_jqi4CAIc9Pe6"  # Free tier: 30M CU/month, 500 CU/s
+  api_key: ""  # set ALCHEMY_API_KEY in the environment
   network: "robinhood-mainnet"
   cu_warning_threshold: 0.8  # Warn at 80% of monthly limit
   cu_monthly_limit: 30000000
 
 # === Bitquery (DISABLED — Ory auth token is invalid for X-API-KEY) ===
 bitquery:
-  api_key: "ory_at_sQI1ZH5uFFTYAsDZ04shUwOn0WS-1R5OmNNIc--2XaU.klEz5Py5QnjW11klVzjfTy49HvMnVASPkH7GG77igO"
+  api_key: ""  # disabled; set BITQUERY_API_KEY in the environment if re-enabled
   enabled: false  # Auth failed; cannot use until valid Bitquery key is obtained
   reason: "Ory auth token is invalid for X-API-KEY header. Unauthorized."
 
@@ -91,15 +91,46 @@ liquidity_flow:
       symbol: "CATE"
   blockscout_base: "https://robinhoodchain.blockscout.com/api/v2"
 
-# === Base Chain Scanner (silent observations + queue transitions) ===
+# === Robinhood Real-Time Runner Radar ===
+runner_radar:
+  enabled: true
+  telegram_enabled: false
+  telegram_min_queue_state: "entry_ready"
+  warmup_no_alert_first_observation: true
+  max_telegram_per_cycle: 3
+  poll_interval_seconds: 120
+  max_pairs: 40
+  dexscreener_chain: "robinhood"
+  search_queries: ["robinhood", "hood", "WETH robinhood", "USDG robinhood"]
+  query_delay_seconds: 0.25
+  transition_cooldown_hours: 24
+  min_liquidity_candidate_usd: 25000
+  min_liquidity_entry_usd: 50000
+  min_holders_candidate: 100
+  min_holders_entry: 300
+  unknown_holders_score: 0
+  min_volume_liquidity_ratio: 3.0
+  watch_volume_liquidity_ratio: 1.0
+  strong_h6_change_pct: 50
+  strong_h24_change_pct: 75
+  min_buy_pressure: 0.55
+  min_5m_buys: 5
+  min_1h_buys: 30
+  dump_m5_change_pct: -10
+  dump_h1_change_pct: -20
+  candidate_score: 65
+  entry_ready_score: 85
+
+# === Base Chain Scanner (journal observations + conservative Telegram transitions) ===
 base_scanner:
   enabled: true
-  dry_run: true
+  dry_run: false  # journal mode active; Telegram gated by telegram_enabled / BASE_SCANNER_TELEGRAM_ENABLED env
   poll_interval_seconds: 900
   max_pairs: 20
   observation_cooldown_hours: 6
   journal_db_path: "state/alert_journal.db"
-  telegram_enabled: false  # preserve Telegram; Base logs observations only until explicitly enabled
+  telegram_enabled: false  # set BASE_SCANNER_TELEGRAM_ENABLED=true in deployment env to enable Base entry_ready alerts
+  telegram_min_queue_state: "entry_ready"  # override with BASE_SCANNER_TELEGRAM_MIN_STATE env
 
 # === Queue/Telegram Policy (noise suppression) ===
 alert_policy:

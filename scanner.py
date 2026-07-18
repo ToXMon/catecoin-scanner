@@ -43,6 +43,7 @@ from zombie_detector import ZombieDetector
 from liquidity_flow import LiquidityFlowAnalyzer
 from reversal_detector import ReversalDetector
 from base_scanner import run_dry_scan as run_base_dry_scan
+from runner_radar import run_scan as run_runner_radar_scan
 
 try:
     import yaml
@@ -60,6 +61,18 @@ DEFAULT_THRESHOLDS = [100, 200, 500, 1000, -50]
 DEFAULT_POLL_INTERVAL = 60
 DEXSCREENER_CHART_URL = "https://dexscreener.com/robinhood/0xac366079b95e56aa2df22de84373e47594dc1031"
 
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_str(name: str, default: str) -> str:
+    value = os.environ.get(name)
+    return default if value is None or value == "" else value
 
 def load_config(config_path: str) -> dict:
     """Load scanner config from YAML file."""
@@ -285,15 +298,53 @@ def _run_base_scanner_once(config: dict) -> int:
     max_pairs = int(base_cfg.get("max_pairs", 20))
     journal_db = base_cfg.get("journal_db_path") or config.get("journal", {}).get("db_path", "state/alert_journal.db")
     chains_config = config.get("chains_config_path", "chains.yaml")
-    result = run_base_dry_scan(max_pairs=max_pairs, journal_db=journal_db, chains_config=chains_config, observation_cooldown_hours=float(base_cfg.get("observation_cooldown_hours", 6)))
+    dry_run = bool(base_cfg.get("dry_run", False))
+    telegram_enabled = _env_bool("BASE_SCANNER_TELEGRAM_ENABLED", bool(base_cfg.get("telegram_enabled", False)))
+    # dry_run means journal-only mode; Telegram is independently gated by telegram_enabled/env
+    result = run_base_dry_scan(
+        max_pairs=max_pairs,
+        journal_db=journal_db,
+        chains_config=chains_config,
+        observation_cooldown_hours=float(base_cfg.get("observation_cooldown_hours", 6)),
+        telegram_enabled=telegram_enabled,
+        telegram_min_state=_env_str("BASE_SCANNER_TELEGRAM_MIN_STATE", str(base_cfg.get("telegram_min_queue_state", "entry_ready"))),
+        config={**config, "chain": "base"},
+        dry_run=dry_run,
+    )
     logger.info(
-        "Base scanner: scanned=%d logged=%d queue=%s alert_worthy=%d telegram=dry-run",
+        "Base scanner: scanned=%d logged=%d queue=%s alert_worthy=%d telegram_sent=%d min_state=%s",
         result.get("pairs_scanned", 0),
         result.get("observations_logged", 0),
         result.get("queue_counts", {}),
         result.get("alert_worthy_count", 0),
+        result.get("telegram_sent", 0),
+        result.get("telegram_min_state", "entry_ready"),
     )
     return int(result.get("alert_worthy_count", 0) or 0)
+
+
+def _run_runner_radar_once(config: dict) -> int:
+    """Run one Robinhood runner radar cycle with journal-first alert transitions."""
+    radar_cfg = config.get("runner_radar", {}) or {}
+    if not radar_cfg.get("enabled", False):
+        return 0
+    radar_cfg = dict(radar_cfg)
+    radar_cfg["telegram_enabled"] = _env_bool("RUNNER_RADAR_TELEGRAM_ENABLED", bool(radar_cfg.get("telegram_enabled", False)))
+    radar_cfg["telegram_min_queue_state"] = _env_str("RUNNER_RADAR_TELEGRAM_MIN_STATE", str(radar_cfg.get("telegram_min_queue_state", "entry_ready")))
+    if _env_bool("RUNNER_RADAR_DRY_RUN", bool(radar_cfg.get("dry_run", False))):
+        radar_cfg["dry_run"] = True
+        radar_cfg["telegram_enabled"] = False
+    config = {**config, "runner_radar": radar_cfg}
+    result = run_runner_radar_scan(config)
+    logger.info(
+        "Runner radar: scanned=%d logged=%d queue=%s telegram_sent=%d duplicates=%d",
+        result.get("pairs_scanned", 0),
+        result.get("observations_logged", 0),
+        result.get("queue_counts", {}),
+        result.get("telegram_sent", 0),
+        result.get("duplicates_skipped", 0),
+    )
+    return int(result.get("telegram_sent", 0) or 0)
 
 # ---------------------------------------------------------------------------
 # Main CLI
@@ -311,6 +362,7 @@ def main():
     parser.add_argument("--zombie-only", action="store_true", help="Only zombie detector")
     parser.add_argument("--liquidity-only", action="store_true", help="Only liquidity flow")
     parser.add_argument("--reversal-only", action="store_true", help="Only reversal detector")
+    parser.add_argument("--runner-radar-only", action="store_true", help="Only Robinhood runner radar")
     parser.add_argument("--test-alert", action="store_true", help="Send test Telegram message")
     args = parser.parse_args()
 
@@ -345,7 +397,7 @@ def main():
     single_mode = (
         args.price_only or args.smart_money_only or args.discovery_only or
         args.whale_only or args.zombie_only or args.liquidity_only
-        or args.reversal_only
+        or args.reversal_only or args.runner_radar_only
     )
 
     if single_mode:
@@ -371,6 +423,8 @@ def main():
         elif args.reversal_only:
             reversal = ReversalDetector(config)
             _run_module_loop("Reversal Detector", reversal, 900)
+        elif args.runner_radar_only:
+            _run_function_loop("Runner Radar", lambda: _run_runner_radar_once(config), config.get("runner_radar", {}).get("poll_interval_seconds", 120))
         return
 
     # --once mode: run all modules once
@@ -448,7 +502,14 @@ def main():
         except Exception as e:
             logger.error("Reversal detector error: %s", e, exc_info=True)
 
-        # Module 8: Base Chain Scanner (dry-run journal observations)
+        # Module 8: Robinhood Runner Radar
+        try:
+            logger.info("--- Robinhood Runner Radar ---")
+            total_alerts += _run_runner_radar_once(config)
+        except Exception as e:
+            logger.error("Runner radar error: %s", e, exc_info=True)
+
+        # Module 9: Base Chain Scanner (journal observations; optional entry-ready Telegram)
         if (config.get("base_scanner", {}) or {}).get("enabled", False):
             try:
                 logger.info("--- Base Chain Scanner (dry-run journal) ---")
@@ -481,6 +542,7 @@ def main():
     liq_interval = config.get("liquidity_flow", {}).get("poll_interval_seconds", 600)
     reversal_interval = config.get("reversal", {}).get("poll_interval_seconds", 900)
     base_interval = config.get("base_scanner", {}).get("poll_interval_seconds", 900)
+    runner_interval = config.get("runner_radar", {}).get("poll_interval_seconds", 120)
 
     last_sm = 0.0
     last_disc = 0.0
@@ -489,10 +551,11 @@ def main():
     last_liq = 0.0
     last_reversal = 0.0
     last_base = 0.0
+    last_runner = 0.0
 
     logger.info(
-        "Intervals: price=%ds sm=%ds disc=%ds whale=%ds zombie=%ds liq=%ds base=%ds",
-        price_interval, sm_interval, disc_interval, whale_interval, zombie_interval, liq_interval, base_interval,
+        "Intervals: price=%ds sm=%ds disc=%ds whale=%ds zombie=%ds liq=%ds runner=%ds base=%ds",
+        price_interval, sm_interval, disc_interval, whale_interval, zombie_interval, liq_interval, runner_interval, base_interval,
     )
 
     while True:
@@ -564,7 +627,17 @@ def main():
                 logger.error("Reversal detector error: %s", e)
             last_reversal = now
 
-        # Base chain scanner (silent journal observations)
+        # Robinhood runner radar (journal all, Telegram only transitions)
+        if now - last_runner >= runner_interval:
+            try:
+                alerts = _run_runner_radar_once(config)
+                if alerts:
+                    logger.info("Runner radar: %d alerts", alerts)
+            except Exception as e:
+                logger.error("Runner radar error: %s", e)
+            last_runner = now
+
+        # Base chain scanner (journal observations; optional entry-ready Telegram)
         if now - last_base >= base_interval:
             try:
                 _run_base_scanner_once(config)
@@ -573,6 +646,17 @@ def main():
             last_base = now
 
         time.sleep(price_interval)
+
+
+def _run_function_loop(name: str, func, interval: int):
+    """Run a stateless scanner function in a continuous loop."""
+    logger.info("%s started (interval=%ds)", name, interval)
+    while True:
+        try:
+            func()
+        except Exception as e:
+            logger.error("%s error: %s", name, e)
+        time.sleep(interval)
 
 
 def _run_module_loop(name: str, module, interval: int):
