@@ -45,6 +45,7 @@ from reversal_detector import ReversalDetector
 from base_scanner import run_dry_scan as run_base_dry_scan
 from runner_radar import run_scan as run_runner_radar_scan
 from alert_analyzer import AlertAnalyzer
+from alert_journal import AlertJournal
 
 try:
     import yaml
