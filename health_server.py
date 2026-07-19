@@ -122,7 +122,6 @@ class HealthHandler(BaseHTTPRequestHandler):
                     self._send_json({"status": "no_adjustments_yet", "message": "No data-driven adjustments generated yet"})
                 return
 
-            self._send_json({"error": "not_found", "path": path}, status=404)
             if path == "/dashboard":
                 self._send_html(DASHBOARD_HTML)
                 return
