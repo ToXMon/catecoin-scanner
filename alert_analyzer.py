@@ -58,6 +58,8 @@ class AlertAnalyzer:
         self.interval_hours: float = float(analyzer_cfg.get("interval_hours", 4))
         self.interval_seconds: int = int(self.interval_hours * 3600)
         self.min_alerts_for_analysis: int = int(analyzer_cfg.get("min_alerts_for_analysis", 5))
+        self.include_observe_alerts: bool = bool(analyzer_cfg.get("include_observe_alerts", True))
+        self.max_non_telegram_per_cycle: int = int(analyzer_cfg.get("max_non_telegram_per_cycle", 60))
         self.auto_apply_thresholds: bool = bool(analyzer_cfg.get("auto_apply_thresholds", False))
         self.outcome_windows: List[str] = list(
             analyzer_cfg.get("outcome_windows", ["15m", "1h", "4h", "24h", "48h"])
@@ -305,6 +307,28 @@ class AlertAnalyzer:
                 for row in tracking_incomplete:
                     if not any(r.get("alert_id") == row["alert_id"] for r in results):
                         results.append(dict(row))
+
+                # Priority 4: Observe-only alerts (non-Telegram) for full-funnel learning
+                if self.include_observe_alerts:
+                    non_telegram = conn.execute(
+                        """
+                        SELECT a.* FROM alerts a
+                        LEFT JOIN alert_analysis aa ON a.alert_id = aa.alert_id
+                        WHERE a.telegram_sent = 0
+                          AND a.queue_state IN ('observe', 'candidate')
+                          AND a.token_address != ''
+                          AND a.token_address LIKE '0x%'
+                          AND aa.alert_id IS NULL
+                          AND a.timestamp < ?
+                        ORDER BY a.timestamp DESC
+                        LIMIT ?
+                        """,
+                        (now - min_age, self.max_non_telegram_per_cycle),
+                    ).fetchall()
+
+                    for row in non_telegram:
+                        if not any(r.get("alert_id") == row["alert_id"] for r in results):
+                            results.append(dict(row))
 
         except Exception as e:
             logger.error("_get_alerts_for_analysis failed: %s", e)
