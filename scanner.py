@@ -43,6 +43,7 @@ from zombie_detector import ZombieDetector
 from liquidity_flow import LiquidityFlowAnalyzer
 from reversal_detector import ReversalDetector
 from base_scanner import run_dry_scan as run_base_dry_scan
+from monad_scanner import run_dry_scan as run_monad_dry_scan
 from runner_radar import run_scan as run_runner_radar_scan
 from alert_analyzer import AlertAnalyzer
 from alert_journal import AlertJournal
@@ -325,6 +326,45 @@ def _run_base_scanner_once(config: dict) -> int:
     return int(result.get("alert_worthy_count", 0) or 0)
 
 
+def _run_monad_scanner_once(config: dict) -> int:
+    """Run one Monad-chain dry scan cycle, logging observations without Telegram by default."""
+    monad_cfg = config.get("monad_scanner", {}) or {}
+    if not _env_bool("MONAD_SCANNER_ENABLED", bool(monad_cfg.get("enabled", False))):
+        return 0
+    max_pairs = int(monad_cfg.get("max_pairs", 20))
+    journal_db = monad_cfg.get("journal_db_path") or config.get("journal", {}).get("db_path", "state/alert_journal.db")
+    chains_config = config.get("chains_config_path", "chains.yaml")
+    dry_run = bool(monad_cfg.get("dry_run", False))
+    telegram_enabled = _env_bool("MONAD_SCANNER_TELEGRAM_ENABLED", bool(monad_cfg.get("telegram_enabled", False)))
+    # dry_run means journal-only mode; Telegram is independently gated by telegram_enabled/env
+    result = run_monad_dry_scan(
+        max_pairs=max_pairs,
+        journal_db=journal_db,
+        chains_config=chains_config,
+        observation_cooldown_hours=float(monad_cfg.get("observation_cooldown_hours", 6)),
+        telegram_enabled=telegram_enabled,
+        telegram_min_state=_env_str("MONAD_SCANNER_TELEGRAM_MIN_STATE", str(monad_cfg.get("telegram_min_queue_state", "entry_ready"))),
+        config={**config, "chain": "monad"},
+        dry_run=dry_run,
+        tracked_wallets=monad_cfg.get("tracked_wallets"),
+        wallet_lookback_blocks=int(monad_cfg.get("wallet_lookback_blocks", 200)),
+    )
+    wallet_info = result.get("wallet_tracking", {}) or {}
+    logger.info(
+        "Monad scanner: scanned=%d logged=%d queue=%s alert_worthy=%d telegram_sent=%d min_state=%s wallets=%d wallet_alerts=%d wallet_skip=%s",
+        result.get("pairs_scanned", 0),
+        result.get("observations_logged", 0),
+        result.get("queue_counts", {}),
+        result.get("alert_worthy_count", 0),
+        result.get("telegram_sent", 0),
+        result.get("telegram_min_state", "entry_ready"),
+        wallet_info.get("wallets_checked", 0),
+        wallet_info.get("wallet_alerts_logged", 0),
+        wallet_info.get("skip_reason", ""),
+    )
+    return int(result.get("alert_worthy_count", 0) or 0)
+
+
 def _run_runner_radar_once(config: dict) -> int:
     """Run one Robinhood runner radar cycle with journal-first alert transitions."""
     radar_cfg = config.get("runner_radar", {}) or {}
@@ -541,6 +581,14 @@ def main():
             except Exception as e:
                 logger.error("Base scanner error: %s", e, exc_info=True)
 
+        # Module 10: Monad Chain Scanner (journal observations; optional entry-ready Telegram)
+        if (config.get("monad_scanner", {}) or {}).get("enabled", False):
+            try:
+                logger.info("--- Monad Chain Scanner (dry-run journal) ---")
+                _run_monad_scanner_once(config)
+            except Exception as e:
+                logger.error("Monad scanner error: %s", e, exc_info=True)
+
         logger.info("=== All modules complete: %d total Telegram alerts sent ===", total_alerts)
         return
 
@@ -566,6 +614,7 @@ def main():
     liq_interval = config.get("liquidity_flow", {}).get("poll_interval_seconds", 600)
     reversal_interval = config.get("reversal", {}).get("poll_interval_seconds", 900)
     base_interval = config.get("base_scanner", {}).get("poll_interval_seconds", 900)
+    monad_interval = config.get("monad_scanner", {}).get("poll_interval_seconds", 900)
     runner_interval = config.get("runner_radar", {}).get("poll_interval_seconds", 120)
     analyzer_interval = int(float(config.get("alert_analyzer", {}).get("interval_hours", 4)) * 3600)
 
@@ -576,12 +625,13 @@ def main():
     last_liq = 0.0
     last_reversal = 0.0
     last_base = 0.0
+    last_monad = 0.0
     last_runner = 0.0
     last_analyzer = 0.0
 
     logger.info(
-        "Intervals: price=%ds sm=%ds disc=%ds whale=%ds zombie=%ds liq=%ds runner=%ds base=%ds analyzer=%ds",
-        price_interval, sm_interval, disc_interval, whale_interval, zombie_interval, liq_interval, runner_interval, base_interval, analyzer_interval,
+        "Intervals: price=%ds sm=%ds disc=%ds whale=%ds zombie=%ds liq=%ds runner=%ds base=%ds monad=%ds analyzer=%ds",
+        price_interval, sm_interval, disc_interval, whale_interval, zombie_interval, liq_interval, runner_interval, base_interval, monad_interval, analyzer_interval,
     )
 
     while True:
@@ -670,6 +720,14 @@ def main():
             except Exception as e:
                 logger.error("Base scanner error: %s", e)
             last_base = now
+
+        # Monad chain scanner (journal observations; optional entry-ready Telegram)
+        if now - last_monad >= monad_interval:
+            try:
+                _run_monad_scanner_once(config)
+            except Exception as e:
+                logger.error("Monad scanner error: %s", e)
+            last_monad = now
 
         # Alert self-improvement analyzer (4-hour cycle)
         if now - last_analyzer >= analyzer_interval:

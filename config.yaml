@@ -132,6 +132,22 @@ base_scanner:
   telegram_enabled: false  # set BASE_SCANNER_TELEGRAM_ENABLED=true in deployment env to enable Base entry_ready alerts
   telegram_min_queue_state: "entry_ready"  # override with BASE_SCANNER_TELEGRAM_MIN_STATE env
 
+# === Monad Chain Scanner (journal observations + conservative Telegram transitions) ===
+monad_scanner:
+  enabled: true  # override with MONAD_SCANNER_ENABLED env
+  dry_run: false  # journal mode active; Telegram gated by telegram_enabled / MONAD_SCANNER_TELEGRAM_ENABLED env
+  poll_interval_seconds: 900
+  max_pairs: 20
+  observation_cooldown_hours: 6
+  journal_db_path: "state/alert_journal.db"
+  telegram_enabled: false  # set MONAD_SCANNER_TELEGRAM_ENABLED=true in deployment env to enable Monad entry_ready alerts
+  telegram_min_queue_state: "entry_ready"  # override with MONAD_SCANNER_TELEGRAM_MIN_STATE env
+  wallet_lookback_blocks: 200  # alchemy_getAssetTransfers lookback window for tracked wallets
+  tracked_wallets:
+    - address: "0x752D9c6463365611B777D2d99aC3f84d75508626"
+      label: "tolu-monad-alpha"
+      tier: "elite"
+
 # === Queue/Telegram Policy (noise suppression) ===
 # === Alert Self-Improvement Analyzer (4-hour cycle) ===
 alert_analyzer:

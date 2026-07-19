@@ -39,3 +39,27 @@ chains:
       max_volume_liquidity_ratio: 5.0
       candidate_score: 60
       entry_ready_score: 75
+  monad:
+    name: Monad
+    chain_id: 143
+    dexscreener_chain: monad
+    native_symbol: MON
+    rpc_env: MONAD_RPC_URL
+    alchemy_api_key_env: ALCHEMY_MONAD_API_KEY  # falls back to ALCHEMY_API_KEY in monad_scanner
+    alchemy_network: monad-mainnet
+    explorer_url: https://monadscan.com
+    search_queries:
+      - "monad meme"
+      - "nads monad"
+      - "molandak"
+      - "chog monad"
+      - "monad pump"
+    filters:
+      min_liquidity_usd: 10000
+      min_fdv_usd: 25000
+      max_fdv_usd: 10000000
+      min_liq_fdv_ratio: 0.05
+      min_volume_liquidity_ratio: 0.2
+      max_volume_liquidity_ratio: 5.0
+      candidate_score: 60
+      entry_ready_score: 75
