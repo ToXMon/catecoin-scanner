@@ -15,7 +15,8 @@ import requests
 
 logger = logging.getLogger("catecoin-scanner.dexscreener")
 
-DEXSCREENER_BASE = "https://api.dexscreener.com/latest/dex"
+DEXSCREENER_API_BASE = "https://api.dexscreener.com"
+DEXSCREENER_BASE = f"{DEXSCREENER_API_BASE}/latest/dex"
 REQUEST_TIMEOUT = 15
 MAX_RETRIES = 3
 RATE_LIMIT_DELAY = 0.25
@@ -40,7 +41,9 @@ class DexScreenerClient:
         })
 
     def _get(self, path: str, params: Optional[Dict[str, Any]] = None) -> Optional[Any]:
-        url = f"{DEXSCREENER_BASE}{path}"
+        return self._get_url(f"{DEXSCREENER_BASE}{path}", params=params)
+
+    def _get_url(self, url: str, params: Optional[Dict[str, Any]] = None) -> Optional[Any]:
         for attempt in range(self.max_retries):
             try:
                 resp = self.session.get(url, params=params, timeout=self.timeout)
@@ -59,7 +62,7 @@ class DexScreenerClient:
                 )
                 if attempt < self.max_retries - 1:
                     time.sleep(wait)
-        logger.error("DexScreener fetch exhausted for %s", path)
+        logger.error("DexScreener fetch exhausted for %s", url)
         return None
 
     def get_pair(self, chain: str, pair_address: str) -> Optional[Dict[str, Any]]:
@@ -93,3 +96,27 @@ class DexScreenerClient:
         if not data:
             return []
         return data.get("pairs") or []
+
+    def get_tokens_batch(self, addresses: List[str]) -> List[Dict[str, Any]]:
+        """GET /tokens/{commaSepAddresses} — batch resolve up to 30 tokens to pairs."""
+        if not addresses:
+            return []
+        data = self._get(f"/tokens/{','.join(addresses[:30])}")
+        if not data:
+            return []
+        return data.get("pairs") or []
+
+    def get_token_profiles(self) -> List[Dict[str, Any]]:
+        """GET /token-profiles/latest/v1 — latest token profiles (fail-open: [])."""
+        data = self._get_url(f"{DEXSCREENER_API_BASE}/token-profiles/latest/v1")
+        return data if isinstance(data, list) else []
+
+    def get_token_boosts_latest(self) -> List[Dict[str, Any]]:
+        """GET /token-boosts/latest/v1 — latest boosted tokens (fail-open: [])."""
+        data = self._get_url(f"{DEXSCREENER_API_BASE}/token-boosts/latest/v1")
+        return data if isinstance(data, list) else []
+
+    def get_token_boosts_top(self) -> List[Dict[str, Any]]:
+        """GET /token-boosts/top/v1 — top boosted tokens (fail-open: [])."""
+        data = self._get_url(f"{DEXSCREENER_API_BASE}/token-boosts/top/v1")
+        return data if isinstance(data, list) else []

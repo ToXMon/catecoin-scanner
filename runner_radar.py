@@ -80,6 +80,58 @@ def dedupe_pairs(pairs: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return out
 
 
+def fetch_discovery_pairs(dex: DexScreenerClient, cfg: Dict[str, Any], chain: str) -> List[Dict[str, Any]]:
+    """Collect robinhood token addresses from DexScreener profiles/boosts and resolve to pairs.
+
+    Fail-open: any endpoint error logs a warning and returns whatever resolved so far.
+    """
+    profiles_enabled = bool(cfg.get("discovery_profiles_enabled", True))
+    boosts_enabled = bool(cfg.get("discovery_boosts_enabled", True))
+    if not profiles_enabled and not boosts_enabled:
+        return []
+    max_tokens = int(cfg.get("discovery_max_tokens", 60) or 60)
+    min_liquidity = _float(cfg.get("discovery_min_liquidity_usd", 2000), 2000)
+    delay = float(cfg.get("query_delay_seconds", 0.25) or 0.25)
+
+    addresses: List[str] = []
+    seen: set[str] = set()
+
+    def _collect(items: Iterable[Dict[str, Any]], source: str) -> None:
+        for item in items or []:
+            if not isinstance(item, dict) or item.get("chainId") != chain:
+                continue
+            address = str(item.get("tokenAddress") or "")
+            if address and address not in seen:
+                seen.add(address)
+                addresses.append(address)
+        logger.info("runner-radar discovery %s: %d chain-matching tokens", source, len(addresses))
+
+    try:
+        if profiles_enabled:
+            _collect(dex.get_token_profiles(), "token-profiles")
+        if boosts_enabled:
+            _collect(dex.get_token_boosts_latest(), "token-boosts/latest")
+            _collect(dex.get_token_boosts_top(), "token-boosts/top")
+    except Exception as e:
+        logger.warning("runner-radar discovery endpoints failed, continuing search-only: %s", e)
+
+    pairs: List[Dict[str, Any]] = []
+    for i in range(0, min(len(addresses), max_tokens), 30):
+        batch = addresses[i:i + 30]
+        try:
+            for pair in dex.get_tokens_batch(batch):
+                if pair.get("chainId") != chain:
+                    continue
+                if _float((pair.get("liquidity") or {}).get("usd")) < min_liquidity:
+                    continue
+                pairs.append(pair)
+        except Exception as e:
+            logger.warning("runner-radar discovery token resolution failed, continuing: %s", e)
+        time.sleep(delay)
+    logger.info("runner-radar discovery: %d addresses -> %d pairs above $%.0f liquidity", len(addresses), len(pairs), min_liquidity)
+    return pairs
+
+
 def fetch_runner_pairs(dex: DexScreenerClient, cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
     queries = cfg.get("search_queries") or DEFAULT_QUERIES
     chain = cfg.get("dexscreener_chain", "robinhood")
@@ -92,9 +144,26 @@ def fetch_runner_pairs(dex: DexScreenerClient, cfg: Dict[str, Any]) -> List[Dict
         time.sleep(float(cfg.get("query_delay_seconds", 0.25) or 0.25))
         if len(found) >= max_pairs * 2:
             break
-    pairs = dedupe_pairs(found)
-    pairs.sort(key=lambda p: _float((p.get("liquidity") or {}).get("usd")), reverse=True)
-    return pairs[:max_pairs]
+    search_pairs = dedupe_pairs(found)
+    search_pairs.sort(key=lambda p: _float((p.get("liquidity") or {}).get("usd")), reverse=True)
+    discovery_pairs = dedupe_pairs(fetch_discovery_pairs(dex, cfg, chain))
+    discovery_pairs.sort(key=lambda p: _float((p.get("liquidity") or {}).get("usd")), reverse=True)
+    # Reserve a lane for discovery-sourced pairs so trending micro-caps are not
+    # crowded out by large static search results (and vice versa).
+    discovery_lane = min(int(cfg.get("discovery_max_pairs", 20) or 20), max_pairs)
+    search_lane = max_pairs - discovery_lane
+    merged: List[Dict[str, Any]] = []
+    seen_keys: set = set()
+    for pair in discovery_pairs[:discovery_lane] + search_pairs[:search_lane]:
+        key = pair.get("pairAddress") or _nested(pair, "baseToken", "address")
+        if key and key not in seen_keys:
+            seen_keys.add(key)
+            merged.append(pair)
+    logger.info(
+        "runner-radar pairs: search=%d discovery=%d merged=%d (lane=%d/%d)",
+        len(search_pairs), len(discovery_pairs), len(merged), search_lane, discovery_lane,
+    )
+    return merged
 
 
 def score_runner_pair(pair: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, Any]:
@@ -343,10 +412,13 @@ def run_scan(config: Dict[str, Any], alerter: Optional[TelegramAlerter] = None) 
     alerter = alerter or (TelegramAlerter.from_config(config) if telegram_enabled else None)
     pairs = fetch_runner_pairs(dex, cfg)
     cooldown_seconds = int(float(cfg.get("transition_cooldown_hours", journal_cfg.get("re_alert_cooldown_hours", 24)) or 24) * 3600)
+    obs_cooldown_seconds = max(0, int(float(cfg.get("observation_cooldown_hours", 6.0) or 0) * 3600))
     since_ts = int(time.time()) - cooldown_seconds
+    obs_since_ts = int(time.time()) - obs_cooldown_seconds
     observations: List[Dict[str, Any]] = []
     telegram_sent = 0
     skipped_duplicates = 0
+    observations_deduped = 0
 
     for pair in pairs:
         metrics = score_runner_pair(pair, cfg)
@@ -358,6 +430,13 @@ def run_scan(config: Dict[str, Any], alerter: Optional[TelegramAlerter] = None) 
             token_address=str(obs.get("token_address") or ""),
             since_ts=since_ts,
         ) if cooldown_seconds else None
+        recent_obs = recent if (recent and _int(recent.get("timestamp")) >= obs_since_ts) else None
+        if recent_obs and obs_cooldown_seconds:
+            old_obs_rank = QUEUE_STATE_RANK.get(str(recent_obs.get("queue_state") or "observe"), 0)
+            new_obs_rank = QUEUE_STATE_RANK.get(str(obs.get("queue_state") or "observe"), 0)
+            if old_obs_rank >= new_obs_rank:
+                observations_deduped += 1
+                continue
         send_now = should_send_transition(
             recent,
             obs,
@@ -385,10 +464,15 @@ def run_scan(config: Dict[str, Any], alerter: Optional[TelegramAlerter] = None) 
     counts: Dict[str, int] = {}
     for obs in observations:
         counts[obs["queue_state"]] = counts.get(obs["queue_state"], 0) + 1
+    logger.info(
+        "runner-radar cycle: pairs=%d logged=%d deduped=%d telegram=%d",
+        len(pairs), len(observations), observations_deduped, telegram_sent,
+    )
     return {
         "enabled": True,
         "pairs_scanned": len(pairs),
         "observations_logged": len(observations),
+        "observations_deduped": observations_deduped,
         "duplicates_skipped": skipped_duplicates,
         "queue_counts": counts,
         "telegram_sent": telegram_sent,

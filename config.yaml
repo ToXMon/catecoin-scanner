@@ -104,6 +104,12 @@ runner_radar:
   search_queries: ["robinhood", "hood", "WETH robinhood", "USDG robinhood"]
   query_delay_seconds: 0.25
   transition_cooldown_hours: 24
+  observation_cooldown_hours: 6
+  discovery_profiles_enabled: true
+  discovery_boosts_enabled: true
+  discovery_max_tokens: 60
+  discovery_max_pairs: 20
+  discovery_min_liquidity_usd: 2000
   min_liquidity_candidate_usd: 25000
   min_liquidity_entry_usd: 50000
   min_holders_candidate: 100
