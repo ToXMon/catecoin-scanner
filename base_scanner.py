@@ -20,6 +20,7 @@ from alert_journal import AlertJournal
 from chain_config import ChainConfig, get_chain_config
 from dexscreener import DexScreenerClient
 from telegram_alert import TelegramAlerter
+from token_identity import token_identity_from_pair
 
 logger = logging.getLogger("base-alpha-scanner")
 
@@ -41,13 +42,13 @@ def pair_token_address(pair: Dict[str, Any]) -> str:
 
 
 def pair_symbol(pair: Dict[str, Any]) -> str:
-    base_token = pair.get("baseToken") or {}
-    return str(base_token.get("symbol") or "UNKNOWN")
+    symbol, _ = token_identity_from_pair(pair)
+    return symbol
 
 
 def pair_name(pair: Dict[str, Any]) -> str:
-    base_token = pair.get("baseToken") or {}
-    return str(base_token.get("name") or pair_symbol(pair))
+    _, name = token_identity_from_pair(pair)
+    return name
 
 
 def score_pair(pair: Dict[str, Any], cfg: ChainConfig) -> Dict[str, Any]:

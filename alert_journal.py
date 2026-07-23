@@ -22,6 +22,8 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional
 
+from token_identity import sanitize_alert_identity
+
 logger = logging.getLogger("catecoin-scanner.journal")
 
 INTERVAL_SECONDS = {
@@ -511,6 +513,11 @@ class AlertJournal:
             for c in checks
         }
         rec = dict(alert)
+        rec["token_symbol"], rec["token_name"] = sanitize_alert_identity(
+            rec.get("token_symbol"),
+            rec.get("token_name"),
+            rec.get("token_address"),
+        )
         for key in ("queue_reasons", "trade_plan_json"):
             if rec.get(key):
                 try:

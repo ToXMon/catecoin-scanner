@@ -22,6 +22,8 @@ import urllib.parse
 import urllib.request
 from typing import Any, Dict, Optional
 
+from token_identity import sanitize_alert_identity
+
 logger = logging.getLogger("catecoin-scanner.alerts")
 
 TELEGRAM_API = "https://api.telegram.org/bot{token}/sendMessage"
@@ -174,6 +176,7 @@ class TelegramAlerter:
         if not self._alpha_alert_allowed(chain, int(alpha_score or 0), float(liquidity or 0), category):
             return False
 
+        symbol, name = sanitize_alert_identity(symbol, name, contract)
         mcap_val = market_cap or fdv or 0
         liq_mcap_ratio = (liquidity / mcap_val) if mcap_val > 0 else 0
         ratio_str = f"{liq_mcap_ratio:.1%}" if liq_mcap_ratio > 0 else "N/A"

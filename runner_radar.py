@@ -15,6 +15,7 @@ from typing import Any, Dict, Iterable, List, Optional
 from alert_journal import AlertJournal
 from dexscreener import DexScreenerClient
 from telegram_alert import TelegramAlerter
+from token_identity import token_identity_from_pair
 
 logger = logging.getLogger("catecoin-scanner.runner-radar")
 
@@ -50,11 +51,13 @@ def pair_token_address(pair: Dict[str, Any]) -> str:
 
 
 def pair_symbol(pair: Dict[str, Any]) -> str:
-    return str(_nested(pair, "baseToken", "symbol", default="UNKNOWN") or "UNKNOWN")
+    symbol, _ = token_identity_from_pair(pair)
+    return symbol
 
 
 def pair_name(pair: Dict[str, Any]) -> str:
-    return str(_nested(pair, "baseToken", "name", default=pair_symbol(pair)) or pair_symbol(pair))
+    _, name = token_identity_from_pair(pair)
+    return name
 
 
 def pair_holders(pair: Dict[str, Any]) -> Optional[int]:
