@@ -220,6 +220,7 @@ class TelegramAlerter:
         whale_addr: str,
         chain: str = "robinhood",
     ) -> bool:
+        symbol, _ = sanitize_alert_identity(symbol, symbol, contract)
         dir_emoji = "📈" if direction == "ACCUMULATION" else "📉"
         whale_short = f"{whale_addr[:6]}...{whale_addr[-4:]}"
         amt_str = _fmt_usd(amount_usd)
@@ -250,6 +251,7 @@ class TelegramAlerter:
         holders: int = 0,
         chain: str = "robinhood",
     ) -> bool:
+        symbol, _ = sanitize_alert_identity(symbol, symbol, contract)
         vol_str = _fmt_usd(current_volume)
         liq_str = _fmt_usd(liquidity)
         mcap_str = _fmt_usd(market_cap) if market_cap > 0 else "N/A"
@@ -288,6 +290,7 @@ class TelegramAlerter:
         thesis: str = "",
         chain: str = "robinhood",
     ) -> bool:
+        symbol, _ = sanitize_alert_identity(symbol, symbol, contract)
         price_str = _fmt_price(price)
         liq_str = _fmt_usd(liquidity)
         mcap_str = _fmt_usd(market_cap) if market_cap > 0 else "N/A"
@@ -325,6 +328,7 @@ class TelegramAlerter:
         signal: str,
         chain: str = "robinhood",
     ) -> bool:
+        symbol, _ = sanitize_alert_identity(symbol, symbol, contract)
         amt_str = _fmt_usd(amount)
         old_str = _fmt_usd(old_liquidity)
         new_str = _fmt_usd(new_liquidity)
@@ -353,6 +357,7 @@ class TelegramAlerter:
         liquidity: float = 0,
         chain: str = "robinhood",
     ) -> bool:
+        symbol, _ = sanitize_alert_identity(symbol, symbol, contract)
         wallet_list = " | ".join(w.get("label", "?")[:30] for w in wallets[:5])
         price_str = _fmt_price(price)
         liq_str = _fmt_usd(liquidity)
@@ -382,6 +387,7 @@ class TelegramAlerter:
         volume_24h: float = 0,
         chain: str = "robinhood",
     ) -> bool:
+        symbol, _ = sanitize_alert_identity(symbol, symbol, contract)
         emoji = "📈" if change_pct > 0 else "📉"
         price_str = _fmt_price(price)
         old_str = _fmt_price(old_price)
